@@ -9,6 +9,8 @@ jobs:
         with: { version: 11.4.0 }
       - uses: actions/setup-node@v4
         with: { node-version: 22.14.0, cache: pnpm }
+      - name: Private research dossier is never committed
+        run: test ! -e EVOORG_RESEARCH.md && test ! -e docs/research/source
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm vitest run --project unit

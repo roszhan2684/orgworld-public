@@ -1,9 +1,11 @@
 # OrgWorld
 
+[![ci](https://github.com/roszhan2684/orgworld-public/actions/workflows/ci.yml/badge.svg)](https://github.com/roszhan2684/orgworld-public/actions/workflows/ci.yml) [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Developer story:** turn your repository into a living AI engineering organization you can watch.
 **Research story:** a laboratory for studying persistent, self-evolving multi-agent organizations (EvoOrg: *continual organizational learning*).
 
-> **About this public copy.** This is a snapshot of the working repository without the private research dossier (`EVOORG_RESEARCH.md` and its source PDF). Section references such as "II-§63" in code and docs point to that dossier; how each requirement is implemented is in `docs/research/RESEARCH_REQUIREMENTS_MAP.md`, and every deviation is in `docs/research/IMPLEMENTATION_CONFLICTS.md`. Pre-registered experiments (written before any data) are in `experiments/`; current verified status is in `docs/verification/STATUS.md`.
+> **About the research dossier.** This repository does not include the private research dossier (`EVOORG_RESEARCH.md` and its source PDF). Section references such as "II-§63" in code and docs point to that dossier; how each requirement is implemented is in `docs/research/RESEARCH_REQUIREMENTS_MAP.md`, and every deviation is in `docs/research/IMPLEMENTATION_CONFLICTS.md`. Pre-registered experiments (written before any data) are in `experiments/`; current verified status is in `docs/verification/STATUS.md`.
 
 Every character move, message and number in OrgWorld comes from a recorded runtime event:
 `real agent action → state change → recorded event → SQLite (append-only) → world, inspector, metrics`.
@@ -11,7 +13,7 @@ Every character move, message and number in OrgWorld comes from a recorded runti
 ## Install as a Claude Code plugin
 
 ```text
-/plugin marketplace add <owner>/orgworld
+/plugin marketplace add roszhan2684/orgworld-public
 /plugin install orgworld@orgworld
 /orgworld:orgworld Build authentication for the sample app
 ```
@@ -49,3 +51,7 @@ Conditions (same task stream, model and per-task budget): single agent (B0), fix
 ## Limitations
 
 See `docs/verification/STATUS.md`. Notably: no real experiment has been run yet; literature baselines (TacoMAS/MetaGen/AgentConductor-style) are not implemented; only one model family is available; browser rendering of the web world has not been verified by automation.
+
+## Contributing
+
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) and issues labelled [`good first issue`](https://github.com/roszhan2684/orgworld-public/labels/good%20first%20issue). Tests are free to run (no model calls cost money). Licensed under [MIT](LICENSE).

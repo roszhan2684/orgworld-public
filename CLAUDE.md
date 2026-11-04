@@ -3,7 +3,7 @@
 OrgWorld is a local-first runtime + visual world for **persistent, self-evolving LLM multi-agent organizations**; EvoOrg is its research engine. It is a research instrument first.
 
 ## Sources of truth
-- Science: `EVOORG_RESEARCH.md` (verbatim from `docs/research/source/*.pdf`). It wins on any scientific question.
+- Science: `EVOORG_RESEARCH.md` (verbatim from `docs/research/source/*.pdf`). It wins on any scientific question. **Both files are private and local-only** (gitignored, blocked by a pre-commit hook and a CI check): never commit, quote at length, or publish them; this repo is public.
 - Implementation: `ORGWORLD_BUILD.md` (truncated at §100 — see conflict C-00).
 - Mapping & deviations: `docs/research/RESEARCH_REQUIREMENTS_MAP.md`, `docs/research/IMPLEMENTATION_CONFLICTS.md`. Never change the scientific design silently — add a conflict entry.
 - Architecture: `docs/architecture/ARCHITECTURE.md`, ADRs in `docs/decisions/`, plan in `docs/architecture/BUILD_PLAN.md`, status in `docs/verification/STATUS.md`.

@@ -1,0 +1,20 @@
+name: Feature or research request
+description: A capability, metric, baseline or experiment condition.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you'd build, and how it stays event-sourced and testable without paid model calls.
+    validations: { required: true }
+  - type: textarea
+    id: science
+    attributes:
+      label: Effect on experiments
+      description: Does this change what any experiment measures? If so, it also needs an entry in docs/research/IMPLEMENTATION_CONFLICTS.md.

@@ -1,0 +1,28 @@
+name: Bug report
+description: Something behaves differently from what the code or docs say.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Commands, config (experiment YAML if relevant), and the smallest steps that show the problem.
+      render: shell
+    validations: { required: true }
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Node version, cognition provider (scripted / ollama / anthropic-api).
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or events
+      description: Relevant output, or the event IDs from `orgworld replay` / `orgworld why`.
+      render: text

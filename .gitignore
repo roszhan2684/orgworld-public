@@ -5,3 +5,7 @@ apps/web/dist/
 test-results/
 playwright-report/
 .DS_Store
+
+# Private research dossier: kept on the researcher's machine only, never committed.
+EVOORG_RESEARCH.md
+docs/research/source/
