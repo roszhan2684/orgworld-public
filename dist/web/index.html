@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OrgWorld</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="banner" id="banner" hidden></div>
+  <header class="top">
+    <div class="logo">OrgWorld <small id="ver">v0.1</small></div>
+    <div class="chips" id="chips"></div>
+    <label class="runpick">run <select id="runSelect" aria-label="Select run"></select></label>
+    <div class="budget" aria-label="Run cost"><number-flow id="nfTokens"></number-flow> tok · <number-flow id="nfCalls"></number-flow> calls · <number-flow id="nfEvents"></number-flow> events · <span id="usdTxt">$0</span></div>
+  </header>
+  <nav class="tabs" role="tablist" aria-label="Views">
+    <button role="tab" aria-selected="true" data-view="world">WORLD</button>
+    <button role="tab" aria-selected="false" data-view="network">NETWORK</button>
+    <button role="tab" aria-selected="false" data-view="evolution">EVOLUTION</button>
+    <button role="tab" aria-selected="false" data-view="metrics">METRICS</button>
+  </nav>
+
+  <section class="view active" id="view-world">
+    <div class="layout">
+      <div class="pane">
+        <div class="pane-head"><h3>World</h3><span class="hint" id="liveTxt">connecting…</span></div>
+        <div class="taskbar"><span class="title" id="taskTitle">—</span><span class="pill" id="taskStatus"></span><span class="hint" id="activityTxt"></span></div>
+        <details class="mission" id="mission" hidden open><summary><span class="mlabel">Current task</span> <span id="missionMeta" class="hint"></span></summary><p id="missionText"></p><p class="hint" id="missionWho"></p></details>
+        <div class="world-box"><canvas id="world" width="960" height="540" aria-label="3D village: agents positioned by recorded events. Drag to orbit, scroll to zoom, click an agent to inspect."></canvas></div>
+        <div class="timeline">
+          <div class="ctl">
+            <button class="btn" id="liveBtn" aria-pressed="true">Live</button>
+            <button class="btn" id="playBtn">Play</button>
+            <span class="hint">speed</span>
+            <button class="btn" data-speed="1" aria-pressed="true">1×</button>
+            <button class="btn" data-speed="2" aria-pressed="false">2×</button>
+            <button class="btn" data-speed="4" aria-pressed="false">4×</button>
+            <button class="btn" data-speed="10" aria-pressed="false">10×</button>
+            <button class="btn" id="jumpDecision">Jump to decision</button>
+            <button class="btn" id="jumpMutation">Jump to mutation</button>
+            <button class="btn" id="followBtn" aria-pressed="false">Follow agent</button>
+            <span class="seq" id="seqTxt"></span>
+          </div>
+          <div class="track"><div class="marks" id="marks"></div><input type="range" id="scrub" min="0" max="0" value="0" aria-label="Replay position (event sequence)"></div>
+        </div>
+      </div>
+      <aside class="side">
+        <div class="pane"><div class="pane-head"><h3>Agent inspector</h3></div><div class="inspector" id="inspector"><p class="hint">Click a character.</p></div></div>
+        <div class="pane"><div class="pane-head"><h3 id="feedTitle">Event stream</h3><span class="hint" id="feedCount"></span></div><div class="feed"><ol id="feed"></ol></div><div class="note" id="hiddenNote" hidden></div></div>
+      </aside>
+    </div>
+  </section>
+  <section class="view" id="view-network"><div class="pane"><div class="pane-head"><h3>Communication network</h3><span class="hint">genome edges · width = messages sent up to the replay position</span></div><div class="pad scroll-x"><svg id="netSvg" viewBox="0 0 760 460"></svg></div></div></section>
+  <section class="view" id="view-evolution"><div class="pane"><div class="pane-head"><h3>Organizational evolution</h3><span class="hint" id="genTxt"></span></div><div id="evoList" class="pad"></div></div></section>
+  <section class="view" id="view-metrics"><div class="pane"><div class="pane-head"><h3>Run metrics</h3><span class="hint">computed from the event log by @orgworld/metrics</span></div><div id="metrics" class="pad"></div></div></section>
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>

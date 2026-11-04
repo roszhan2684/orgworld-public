@@ -1,0 +1,17 @@
+{
+  "name": "@orgworld/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@orgworld/protocol": "workspace:*",
+    "@orgworld/core": "workspace:*",
+    "@orgworld/store": "workspace:*",
+    "@orgworld/cognition": "workspace:*",
+    "@orgworld/bench": "workspace:*",
+    "zod": "4.6.7"
+  }
+}

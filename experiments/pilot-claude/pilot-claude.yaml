@@ -1,0 +1,46 @@
+# Replication of experiments/pilot/pilot.yaml on Claude Haiku 5.5 (see PROTOCOL.md in this folder).
+# Identical stream, conditions, repetitions and per-task budget; only the model block differs.
+# PAID: needs ANTHROPIC_API_KEY and --allow-paid. Frozen (config hash stored) when the experiment locks.
+experiment:
+  name: pilot-abrupt-shift-haiku55
+  description: Replication of pilot-abrupt-shift on Claude Haiku 5.5. Does persistent organizational learning beat fixed and per-task-adaptive organizations under an abrupt task-distribution shift at matched per-task budget?
+  hypotheses: [III-H1, III-H2, FC1, FC2, FC4, FC6]
+stream:
+  kind: abrupt
+  tasks: 100
+  seed: 101
+  phases:
+    - id: A
+      mix: { implementation: 0.6, debugging: 0.3, testing: 0.1 }
+    - id: B
+      mix: { security: 0.5, implementation: 0.2, debugging: 0.2, refactoring: 0.1 }
+conditions:
+  - { id: single, condition: single-agent, preset: single-agent }
+  - { id: fixed, condition: fixed-specialist, preset: specialist-pool }
+  - { id: pertask, condition: per-task-adaptive, preset: specialist-pool }
+  - id: evoorg
+    condition: evoorg
+    preset: generalists-4
+    evolution: { trigger: { kind: periodic, everyK: 20 }, minTasksBeforeFirst: 20, bufferRecent: 4, bufferHistorical: 2, delta: 0.05 }
+  - id: random
+    condition: random-evolution
+    preset: generalists-4
+    evolution: { trigger: { kind: periodic, everyK: 20 }, minTasksBeforeFirst: 20 }
+repetitions: 3
+controls:
+  model:
+    provider: anthropic-api
+    model: claude-haiku-5-5
+    # No temperature/seed: Claude Haiku 5.5 rejects non-default sampling parameters (conflict C-20), so these runs
+    # are NOT sampling-controlled; the 3 repetitions carry sampling variance.
+    # Prices: platform.claude.com/docs/en/about-claude/pricing, read 2026-11-04 (USD per million tokens).
+    pricing:
+      claude-haiku-5-5:
+        inputPerMTok: 0.10
+        outputPerMTok: 0.50
+        cacheReadPerMTok: 0.01
+        cacheWritePerMTok: 0.125
+        longContext: { aboveInputTokens: 100000, inputPerMTok: 0.50, outputPerMTok: 2.50, cacheReadPerMTok: 0.05, cacheWritePerMTok: 0.625 }
+  budget: { perTask: { maxTokens: 60000, maxCalls: 20, maxUsd: 0.25, reserveTokens: 2500 } }
+  # Worst case ≈ 1,500 task-runs × 60k tokens at the output rate ($0.03) + validation re-runs ≈ $60.
+  maxTotalUsd: 100

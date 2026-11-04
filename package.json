@@ -1,0 +1,30 @@
+{
+  "name": "orgworld-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OrgWorld: persistent, self-evolving multi-agent organizations (EvoOrg research engine)",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "packageManager": "pnpm@11.4.0",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:live": "ORGWORLD_LIVE=1 vitest run --project live",
+    "build": "node scripts/build.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:e2e": "pnpm build && vitest run --project e2e"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "@types/node": "22.20.5",
+    "@types/ws": "8.18.2",
+    "esbuild": "0.28.2",
+    "prettier": "3.6.2",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+.orgworld/
+*.log
+apps/web/dist/
+test-results/
+playwright-report/
+.DS_Store

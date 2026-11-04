@@ -1,0 +1,22 @@
+{
+  "name": "@orgworld/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@orgworld/protocol": "workspace:*",
+    "@orgworld/core": "workspace:*",
+    "@orgworld/store": "workspace:*",
+    "@orgworld/metrics": "workspace:*",
+    "@orgworld/runtime": "workspace:*",
+    "@orgworld/cognition": "workspace:*",
+    "@orgworld/bench": "workspace:*",
+    "@orgworld/evoorg": "workspace:*",
+    "@orgworld/experiment": "workspace:*",
+    "@orgworld/server": "workspace:*",
+    "yaml": "2.9.1"
+  }
+}

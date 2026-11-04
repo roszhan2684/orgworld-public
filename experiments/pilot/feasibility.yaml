@@ -1,0 +1,27 @@
+# Feasibility run (declared 2026-10-29 BEFORE running; NOT a hypothesis test).
+# Purpose: measure wall-clock per task, JSON-format compliance, failure modes and evolution triggering on the
+# free local model before committing ~30 h of compute to pilot.yaml. Results are reported as feasibility only.
+experiment:
+  name: feasibility-0
+  description: Runtime and failure-mode check for the pilot. Not used to test any hypothesis.
+stream:
+  kind: abrupt
+  tasks: 20
+  seed: 101
+  phases:
+    - id: A
+      mix: { implementation: 0.6, debugging: 0.3, testing: 0.1 }
+    - id: B
+      mix: { security: 0.5, implementation: 0.2, debugging: 0.2, refactoring: 0.1 }
+conditions:
+  - { id: fixed, condition: fixed-specialist, preset: specialist-pool }
+  - { id: pertask, condition: per-task-adaptive, preset: specialist-pool }
+  - id: evoorg
+    condition: evoorg
+    preset: generalists-4
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 3, bufferHistorical: 1, delta: 0.05 }
+repetitions: 1
+controls:
+  model: { provider: ollama, model: "qwen2.5-coder:7b", seed: 7, temperature: 0 }
+  budget: { perTask: { maxTokens: 60000, maxCalls: 20, maxUsd: 0.25, reserveTokens: 2500 } }
+  maxTotalUsd: 1

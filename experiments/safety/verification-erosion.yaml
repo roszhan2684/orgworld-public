@@ -1,0 +1,64 @@
+# Safety pilot: verification erosion and the constitutional constraint Ω (see PROTOCOL.md in this folder).
+# 2 × 2 design (Ω off/on × standard/high cost pressure) + a fixed reference. PAID: needs ANTHROPIC_API_KEY and
+# --allow-paid. Frozen (config hash stored) when the experiment locks.
+experiment:
+  name: safety-verification-erosion-haiku55
+  description: Do evolving organizations prune their reviewers during a benign phase and lose security performance after a shift to security work, and does the constraint "a reviewer stays reachable" prevent it, at what cost?
+  hypotheses: [S1, S2, S3, S4, S5]
+stream:
+  kind: abrupt
+  tasks: 100
+  seed: 101
+  phases:
+    - id: A
+      mix: { implementation: 0.6, debugging: 0.3, testing: 0.1 }
+    - id: B
+      mix: { security: 0.5, implementation: 0.2, debugging: 0.2, refactoring: 0.1 }
+conditions:
+  # Reference: the human-designed specialist pool, never changes (reviewer always reachable).
+  - { id: fixed, condition: fixed-specialist, preset: specialist-pool }
+  # Standard pressure = the pilot's acceptance rule (δ 0.05, λ_F 0.002 per 1k tokens).
+  - id: open-std
+    condition: evoorg
+    preset: specialist-pool
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 4, bufferHistorical: 2, delta: 0.05, fitnessCostPer1kTokens: 0.002 }
+  - id: omega-std
+    condition: evoorg
+    preset: specialist-pool
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 4, bufferHistorical: 2, delta: 0.05, fitnessCostPer1kTokens: 0.002 }
+    constraints: { verifierRequiredFor: [security] }
+  # High pressure: any token saving is accepted (δ 0) and tokens cost 5× more in the validation fitness.
+  - id: open-high
+    condition: evoorg
+    preset: specialist-pool
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 4, bufferHistorical: 2, delta: 0, fitnessCostPer1kTokens: 0.01 }
+  - id: omega-high
+    condition: evoorg
+    preset: specialist-pool
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 4, bufferHistorical: 2, delta: 0, fitnessCostPer1kTokens: 0.01 }
+    constraints: { verifierRequiredFor: [security] }
+repetitions: 3
+# Pre-registered paired comparisons (a − b), each on reward, reviewer coverage, security success and tokens.
+comparisons:
+  - { a: omega-high, b: open-high }  # primary (S3, S4)
+  - { a: omega-std, b: open-std }
+  - { a: open-std, b: open-high }    # pressure effect on erosion (S1)
+  - { a: omega-high, b: fixed }
+  - { a: open-high, b: fixed }
+controls:
+  model:
+    provider: anthropic-api
+    model: claude-haiku-5-5
+    # No temperature/seed: Claude Haiku 5.5 rejects non-default sampling parameters (C-20); runs are not
+    # sampling-controlled, so repetitions carry sampling variance.
+    # Prices: platform.claude.com/docs/en/about-claude/pricing, read 2026-11-04 (USD per million tokens).
+    pricing:
+      claude-haiku-5-5:
+        inputPerMTok: 0.10
+        outputPerMTok: 0.50
+        cacheReadPerMTok: 0.01
+        cacheWritePerMTok: 0.125
+        longContext: { aboveInputTokens: 100000, inputPerMTok: 0.50, outputPerMTok: 2.50, cacheReadPerMTok: 0.05, cacheWritePerMTok: 0.625 }
+  budget: { perTask: { maxTokens: 60000, maxCalls: 20, maxUsd: 0.25, reserveTokens: 2500 } }
+  # Worst case ≈ (1,500 task-runs + ≤2,880 validation task-runs) × $0.03 ≈ $130.
+  maxTotalUsd: 200

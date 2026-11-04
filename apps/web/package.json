@@ -1,0 +1,15 @@
+{
+  "name": "@orgworld/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@orgworld/protocol": "workspace:*",
+    "@orgworld/core": "workspace:*",
+    "three": "0.179.1",
+    "number-flow": "0.6.2"
+  },
+  "devDependencies": {
+    "@types/three": "0.179.0"
+  }
+}

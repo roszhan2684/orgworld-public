@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+  - apps/*
+  - cli
+  - integrations/*
+allowBuilds:
+  esbuild: true

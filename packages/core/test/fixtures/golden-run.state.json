@@ -1,0 +1,860 @@
+{
+  "runId": "run_golden",
+  "config": {
+    "runId": "run_golden",
+    "mode": "experiment",
+    "kind": "stream",
+    "condition": "fixed-generalist",
+    "genome": {
+      "schemaVersion": 1,
+      "id": "preset-generalists-2",
+      "name": "2 Generalists",
+      "preset": "generalists-2",
+      "generation": 0,
+      "parentId": null,
+      "createdBy": "preset",
+      "roles": [
+        {
+          "id": "generalist",
+          "name": "Generalist",
+          "objective": "Do whatever the task needs: plan, implement, test, review, and coordinate with teammates.",
+          "inputTypes": [
+            "task",
+            "message",
+            "code"
+          ],
+          "outputTypes": [
+            "code",
+            "tests",
+            "review",
+            "message"
+          ],
+          "capabilities": [
+            "write_code",
+            "write_tests",
+            "run_checks",
+            "review",
+            "research",
+            "plan",
+            "submit"
+          ]
+        }
+      ],
+      "agents": [
+        {
+          "id": "a1",
+          "name": "A1",
+          "roleId": "generalist"
+        },
+        {
+          "id": "a2",
+          "name": "A2",
+          "roleId": "generalist"
+        }
+      ],
+      "edges": [
+        {
+          "from": "a1",
+          "to": "a2",
+          "kind": "delegate"
+        },
+        {
+          "from": "a2",
+          "to": "a1",
+          "kind": "inform"
+        }
+      ],
+      "teams": [],
+      "entryAgentId": "a1",
+      "policies": {
+        "submit": "entry",
+        "decision": "MAJORITY",
+        "maxTurnsPerTask": 16,
+        "maxActionsPerTurn": 3,
+        "memoryRead": "org"
+      },
+      "constraints": {
+        "minAgents": 1,
+        "maxAgents": 8,
+        "verifierRequiredFor": [],
+        "protectEntry": true
+      }
+    },
+    "model": {
+      "provider": "scripted",
+      "model": "fixture",
+      "maxOutputTokensPerCall": 2048
+    },
+    "budget": {
+      "perTask": {
+        "maxTokens": 60000,
+        "maxCalls": 20,
+        "maxUsd": 0.25,
+        "reserveTokens": 2500
+      },
+      "perRun": {},
+      "maxAgents": 16,
+      "maxConcurrentAgents": 1
+    },
+    "reward": {
+      "taskQuality": 1,
+      "lambdaCostPer1kTokens": 0,
+      "muStructural": 0,
+      "verification": 0,
+      "coordinationPer10Messages": 0,
+      "successThreshold": 1
+    },
+    "seeds": {
+      "benchmark": 1,
+      "taskOrder": 1,
+      "organization": 1,
+      "mutation": 1
+    },
+    "features": {
+      "crossTaskMemory": false,
+      "relationships": false,
+      "meetings": true,
+      "decisions": true,
+      "beliefs": true
+    },
+    "ablations": [],
+    "evolution": {
+      "enabled": false,
+      "trigger": {
+        "kind": "periodic",
+        "everyK": 20
+      },
+      "minTasksBeforeFirst": 20,
+      "historyWindow": 30,
+      "bufferRecent": 4,
+      "bufferHistorical": 2,
+      "delta": 0.05,
+      "fitnessCostPer1kTokens": 0.002,
+      "mutationSet": "paper1",
+      "proposer": "heuristic",
+      "maxProposalsPerTrigger": 2,
+      "rollback": {
+        "enabled": true,
+        "window": 10,
+        "dropThreshold": 0.2
+      }
+    },
+    "policy": {
+      "kind": "none",
+      "candidates": []
+    },
+    "versions": {
+      "orgworld": "0.1.0"
+    },
+    "environment": {
+      "fixture": "true"
+    }
+  },
+  "status": "completed",
+  "createdAt": "2026-10-28T12:00:00.000Z",
+  "endedAt": "2026-10-28T12:00:27.000Z",
+  "summary": {
+    "tasks": 1,
+    "success": 1
+  },
+  "error": null,
+  "lastSequence": 28,
+  "eventCount": 28,
+  "genome": {
+    "schemaVersion": 1,
+    "id": "preset-generalists-2",
+    "name": "2 Generalists",
+    "preset": "generalists-2",
+    "generation": 0,
+    "parentId": null,
+    "createdBy": "preset",
+    "roles": [
+      {
+        "id": "generalist",
+        "name": "Generalist",
+        "objective": "Do whatever the task needs: plan, implement, test, review, and coordinate with teammates.",
+        "inputTypes": [
+          "task",
+          "message",
+          "code"
+        ],
+        "outputTypes": [
+          "code",
+          "tests",
+          "review",
+          "message"
+        ],
+        "capabilities": [
+          "write_code",
+          "write_tests",
+          "run_checks",
+          "review",
+          "research",
+          "plan",
+          "submit"
+        ]
+      }
+    ],
+    "agents": [
+      {
+        "id": "a1",
+        "name": "A1",
+        "roleId": "generalist"
+      },
+      {
+        "id": "a2",
+        "name": "A2",
+        "roleId": "generalist"
+      }
+    ],
+    "edges": [
+      {
+        "from": "a1",
+        "to": "a2",
+        "kind": "delegate"
+      },
+      {
+        "from": "a2",
+        "to": "a1",
+        "kind": "inform"
+      }
+    ],
+    "teams": [],
+    "entryAgentId": "a1",
+    "policies": {
+      "submit": "entry",
+      "decision": "MAJORITY",
+      "maxTurnsPerTask": 16,
+      "maxActionsPerTurn": 3,
+      "memoryRead": "org"
+    },
+    "constraints": {
+      "minAgents": 1,
+      "maxAgents": 8,
+      "verifierRequiredFor": [],
+      "protectEntry": true
+    }
+  },
+  "genomes": {
+    "preset-generalists-2": {
+      "schemaVersion": 1,
+      "id": "preset-generalists-2",
+      "name": "2 Generalists",
+      "preset": "generalists-2",
+      "generation": 0,
+      "parentId": null,
+      "createdBy": "preset",
+      "roles": [
+        {
+          "id": "generalist",
+          "name": "Generalist",
+          "objective": "Do whatever the task needs: plan, implement, test, review, and coordinate with teammates.",
+          "inputTypes": [
+            "task",
+            "message",
+            "code"
+          ],
+          "outputTypes": [
+            "code",
+            "tests",
+            "review",
+            "message"
+          ],
+          "capabilities": [
+            "write_code",
+            "write_tests",
+            "run_checks",
+            "review",
+            "research",
+            "plan",
+            "submit"
+          ]
+        }
+      ],
+      "agents": [
+        {
+          "id": "a1",
+          "name": "A1",
+          "roleId": "generalist"
+        },
+        {
+          "id": "a2",
+          "name": "A2",
+          "roleId": "generalist"
+        }
+      ],
+      "edges": [
+        {
+          "from": "a1",
+          "to": "a2",
+          "kind": "delegate"
+        },
+        {
+          "from": "a2",
+          "to": "a1",
+          "kind": "inform"
+        }
+      ],
+      "teams": [],
+      "entryAgentId": "a1",
+      "policies": {
+        "submit": "entry",
+        "decision": "MAJORITY",
+        "maxTurnsPerTask": 16,
+        "maxActionsPerTurn": 3,
+        "memoryRead": "org"
+      },
+      "constraints": {
+        "minAgents": 1,
+        "maxAgents": 8,
+        "verifierRequiredFor": [],
+        "protectEntry": true
+      }
+    }
+  },
+  "agents": {
+    "a1": {
+      "id": "a1",
+      "name": "A1",
+      "roleId": "generalist",
+      "roleName": "Generalist",
+      "roleObjective": "x",
+      "capabilities": [
+        "write_code",
+        "review",
+        "submit"
+      ],
+      "modelProvider": "scripted",
+      "modelName": "fixture",
+      "generationCreated": 0,
+      "teamId": null,
+      "status": "working",
+      "activity": "recording episodic memory",
+      "room": "library",
+      "homeRoom": "command",
+      "targetAgentId": null,
+      "activitySeq": 27,
+      "currentTaskId": null,
+      "removed": false,
+      "createdAt": "2026-10-28T12:00:02.000Z",
+      "updatedAt": "2026-10-28T12:00:26.000Z",
+      "tokensConsumed": 1200,
+      "calls": 1,
+      "usd": 0.001,
+      "knownMessageIds": [
+        "m1",
+        "m2"
+      ],
+      "knownArtifactIds": [
+        "art1",
+        "art2"
+      ],
+      "knownDecisionIds": [
+        "d1"
+      ],
+      "beliefs": {},
+      "stats": {
+        "messagesSent": 1,
+        "messagesReceived": 1,
+        "artifactsCreated": 1,
+        "checksRun": 0,
+        "reviews": 0,
+        "votes": 1,
+        "submissions": 1,
+        "successfulSubmissions": 1,
+        "failures": 0,
+        "actionsRejected": 0,
+        "workByCategory": {
+          "implementation": 2
+        }
+      }
+    },
+    "a2": {
+      "id": "a2",
+      "name": "A2",
+      "roleId": "generalist",
+      "roleName": "Generalist",
+      "roleObjective": "x",
+      "capabilities": [
+        "write_code",
+        "review",
+        "submit"
+      ],
+      "modelProvider": "scripted",
+      "modelName": "fixture",
+      "generationCreated": 0,
+      "teamId": null,
+      "status": "working",
+      "activity": "voted ship",
+      "room": "decision",
+      "homeRoom": "engineering",
+      "targetAgentId": null,
+      "activitySeq": 22,
+      "currentTaskId": null,
+      "removed": false,
+      "createdAt": "2026-10-28T12:00:03.000Z",
+      "updatedAt": "2026-10-28T12:00:21.000Z",
+      "tokensConsumed": 1200,
+      "calls": 1,
+      "usd": 0.001,
+      "knownMessageIds": [
+        "m1",
+        "m2"
+      ],
+      "knownArtifactIds": [
+        "art1",
+        "art2"
+      ],
+      "knownDecisionIds": [
+        "d1"
+      ],
+      "beliefs": {},
+      "stats": {
+        "messagesSent": 1,
+        "messagesReceived": 1,
+        "artifactsCreated": 1,
+        "checksRun": 0,
+        "reviews": 1,
+        "votes": 1,
+        "submissions": 0,
+        "successfulSubmissions": 0,
+        "failures": 0,
+        "actionsRejected": 0,
+        "workByCategory": {
+          "implementation": 2
+        }
+      }
+    }
+  },
+  "agentOrder": [
+    "a1",
+    "a2"
+  ],
+  "tasks": {
+    "t1": {
+      "id": "t1",
+      "parentId": null,
+      "title": "sum",
+      "objective": "implement sum",
+      "source": "bench",
+      "category": "implementation",
+      "family": "impl-sum",
+      "taskIndex": 0,
+      "phaseId": "A",
+      "split": null,
+      "status": "COMPLETED",
+      "assignedAgents": [
+        "a1"
+      ],
+      "createdSeq": 7,
+      "createdAt": "2026-10-28T12:00:06.000Z",
+      "startedAt": "2026-10-28T12:00:08.000Z",
+      "completedAt": "2026-10-28T12:00:25.000Z",
+      "score": 1,
+      "success": true,
+      "submittedArtifactId": "art1",
+      "submittedBy": "a1",
+      "forced": false,
+      "genomeId": "preset-generalists-2",
+      "tokens": 2400,
+      "calls": 2,
+      "usd": 0.002,
+      "messages": 2,
+      "evaluation": {
+        "taskId": "t1",
+        "evaluator": "hidden-tests",
+        "score": 1,
+        "passed": 4,
+        "total": 4,
+        "details": "ok",
+        "artifactId": "art1"
+      },
+      "reward": {
+        "taskId": "t1",
+        "total": 1,
+        "success": true,
+        "terms": {
+          "quality": 1
+        },
+        "rewardConfigHash": "r"
+      },
+      "outputArtifactIds": [
+        "art1",
+        "art2"
+      ]
+    }
+  },
+  "taskOrder": [
+    "t1"
+  ],
+  "activeTaskId": null,
+  "messages": {
+    "m1": {
+      "messageId": "m1",
+      "from": "a1",
+      "to": [
+        "a2"
+      ],
+      "kind": "REVIEW_REQUEST",
+      "content": "please review",
+      "taskId": "t1",
+      "artifactIds": [
+        "art1"
+      ],
+      "tokenCost": 40,
+      "seq": 13,
+      "timestamp": "2026-10-28T12:00:12.000Z",
+      "receivedBy": [
+        "a2"
+      ]
+    },
+    "m2": {
+      "messageId": "m2",
+      "from": "a2",
+      "to": [
+        "a1"
+      ],
+      "kind": "REVIEW_RESPONSE",
+      "content": "approved",
+      "taskId": "t1",
+      "artifactIds": [
+        "art2"
+      ],
+      "tokenCost": 20,
+      "seq": 18,
+      "timestamp": "2026-10-28T12:00:17.000Z",
+      "receivedBy": [
+        "a1"
+      ]
+    }
+  },
+  "messageOrder": [
+    "m1",
+    "m2"
+  ],
+  "artifacts": {
+    "art1": {
+      "artifactId": "art1",
+      "kind": "code",
+      "title": "sum v1",
+      "taskId": "t1",
+      "authorId": "a1",
+      "content": "module.exports=(a,b)=>a+b",
+      "contentHash": "h1",
+      "parents": [],
+      "visibleTo": [
+        "a1"
+      ],
+      "seq": 12,
+      "timestamp": "2026-10-28T12:00:11.000Z"
+    },
+    "art2": {
+      "artifactId": "art2",
+      "kind": "review",
+      "title": "LGTM",
+      "taskId": "t1",
+      "authorId": "a2",
+      "content": "approve",
+      "contentHash": "h2",
+      "parents": [
+        "art1"
+      ],
+      "visibleTo": [
+        "a2"
+      ],
+      "seq": 17,
+      "timestamp": "2026-10-28T12:00:16.000Z"
+    }
+  },
+  "artifactOrder": [
+    "art1",
+    "art2"
+  ],
+  "decisions": {
+    "d1": {
+      "decisionId": "d1",
+      "question": "ship v1?",
+      "options": [
+        "ship",
+        "revise"
+      ],
+      "proposerId": "a1",
+      "recommendation": "ship",
+      "evidence": [
+        "art2"
+      ],
+      "policy": "MAJORITY",
+      "participants": [
+        "a1",
+        "a2"
+      ],
+      "taskId": "t1",
+      "seq": 20,
+      "timestamp": "2026-10-28T12:00:19.000Z",
+      "votes": [
+        {
+          "decisionId": "d1",
+          "agentId": "a1",
+          "option": "ship",
+          "rationale": "tests pass",
+          "weight": 1,
+          "seq": 21
+        },
+        {
+          "decisionId": "d1",
+          "agentId": "a2",
+          "option": "ship",
+          "rationale": "reviewed",
+          "weight": 1,
+          "seq": 22
+        }
+      ],
+      "outcome": {
+        "decisionId": "d1",
+        "chosen": "ship",
+        "confidence": 1,
+        "policy": "MAJORITY",
+        "tally": {
+          "ship": 2
+        },
+        "rationale": "unanimous",
+        "opposition": [],
+        "seq": 23
+      }
+    }
+  },
+  "decisionOrder": [
+    "d1"
+  ],
+  "meetings": {},
+  "memory": {
+    "mem1": {
+      "memoryId": "mem1",
+      "scope": "private",
+      "kind": "episodic",
+      "ownerAgentId": "a1",
+      "content": "a2 reviews fast",
+      "provenance": {
+        "runId": "run_golden",
+        "taskId": "t1",
+        "genomeId": "preset-generalists-2",
+        "sourceEventIds": [
+          "run_golden-e18"
+        ],
+        "evidenceArtifactIds": []
+      },
+      "seq": 27,
+      "timestamp": "2026-10-28T12:00:26.000Z",
+      "retrievals": 0
+    }
+  },
+  "checkRuns": {},
+  "relationships": {},
+  "costs": {
+    "total": {
+      "calls": 2,
+      "tokens": 2400,
+      "inputTokens": 2000,
+      "outputTokens": 400,
+      "usd": 0.002
+    },
+    "byCategory": {
+      "task": {
+        "calls": 2,
+        "tokens": 2400,
+        "inputTokens": 2000,
+        "outputTokens": 400,
+        "usd": 0.002
+      },
+      "controller": {
+        "calls": 0,
+        "tokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "usd": 0
+      },
+      "validation": {
+        "calls": 0,
+        "tokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "usd": 0
+      },
+      "probe": {
+        "calls": 0,
+        "tokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "usd": 0
+      }
+    }
+  },
+  "modelCallsInFlight": {},
+  "budget": {
+    "task": null,
+    "run": null
+  },
+  "phase": {
+    "index": 0,
+    "id": "A",
+    "mix": {
+      "implementation": 1
+    }
+  },
+  "evolution": {
+    "generation": 0,
+    "entries": [
+      {
+        "seq": 2,
+        "kind": "instantiated",
+        "generation": 0,
+        "genomeId": "preset-generalists-2",
+        "detail": "2 Generalists (preset)"
+      }
+    ],
+    "proposals": {}
+  },
+  "policySelections": [],
+  "rejectedActions": [],
+  "anomalies": [],
+  "contaminated": false,
+  "toolInvocations": 0,
+  "timeline": [
+    {
+      "seq": 1,
+      "timestamp": "2026-10-28T12:00:00.000Z",
+      "type": "RUN_CREATED",
+      "label": "Run created (fixed-generalist, scripted/fixture)",
+      "actorId": "runtime",
+      "refId": null
+    },
+    {
+      "seq": 2,
+      "timestamp": "2026-10-28T12:00:01.000Z",
+      "type": "ORGANIZATION_INSTANTIATED",
+      "label": "Organization instantiated: 2 Generalists gen 0",
+      "actorId": "runtime",
+      "refId": "preset-generalists-2"
+    },
+    {
+      "seq": 3,
+      "timestamp": "2026-10-28T12:00:02.000Z",
+      "type": "AGENT_CREATED",
+      "label": "Agent A1 (Generalist) joined",
+      "actorId": "runtime",
+      "refId": "a1"
+    },
+    {
+      "seq": 4,
+      "timestamp": "2026-10-28T12:00:03.000Z",
+      "type": "AGENT_CREATED",
+      "label": "Agent A2 (Generalist) joined",
+      "actorId": "runtime",
+      "refId": "a2"
+    },
+    {
+      "seq": 5,
+      "timestamp": "2026-10-28T12:00:04.000Z",
+      "type": "RUN_STARTED",
+      "label": "Run started",
+      "actorId": "runtime",
+      "refId": null
+    },
+    {
+      "seq": 6,
+      "timestamp": "2026-10-28T12:00:05.000Z",
+      "type": "PHASE_CHANGED",
+      "label": "Phase → A",
+      "actorId": "runtime",
+      "refId": null
+    },
+    {
+      "seq": 7,
+      "timestamp": "2026-10-28T12:00:06.000Z",
+      "type": "TASK_CREATED",
+      "label": "Task created: sum",
+      "actorId": "runtime",
+      "refId": "t1"
+    },
+    {
+      "seq": 12,
+      "timestamp": "2026-10-28T12:00:11.000Z",
+      "type": "ARTIFACT_CREATED",
+      "label": "a1 created code: sum v1",
+      "actorId": "a1",
+      "refId": "art1"
+    },
+    {
+      "seq": 13,
+      "timestamp": "2026-10-28T12:00:12.000Z",
+      "type": "MESSAGE_SENT",
+      "label": "a1 → a2 [REVIEW_REQUEST] please review",
+      "actorId": "a1",
+      "refId": "m1"
+    },
+    {
+      "seq": 17,
+      "timestamp": "2026-10-28T12:00:16.000Z",
+      "type": "ARTIFACT_CREATED",
+      "label": "a2 created review: LGTM",
+      "actorId": "a2",
+      "refId": "art2"
+    },
+    {
+      "seq": 18,
+      "timestamp": "2026-10-28T12:00:17.000Z",
+      "type": "MESSAGE_SENT",
+      "label": "a2 → a1 [REVIEW_RESPONSE] approved",
+      "actorId": "a2",
+      "refId": "m2"
+    },
+    {
+      "seq": 20,
+      "timestamp": "2026-10-28T12:00:19.000Z",
+      "type": "DECISION_CREATED",
+      "label": "Decision proposed by a1: ship v1?",
+      "actorId": "a1",
+      "refId": "d1"
+    },
+    {
+      "seq": 23,
+      "timestamp": "2026-10-28T12:00:22.000Z",
+      "type": "DECISION_COMPLETED",
+      "label": "Decision: ship v1? → ship (MAJORITY, conf 1.00)",
+      "actorId": "runtime",
+      "refId": "d1"
+    },
+    {
+      "seq": 24,
+      "timestamp": "2026-10-28T12:00:23.000Z",
+      "type": "EVALUATION_COMPLETED",
+      "label": "Evaluated sum: 4/4 hidden tests (hidden-tests)",
+      "actorId": "evaluator",
+      "refId": "t1"
+    },
+    {
+      "seq": 26,
+      "timestamp": "2026-10-28T12:00:25.000Z",
+      "type": "TASK_COMPLETED",
+      "label": "Task succeeded: sum (score 1.00)",
+      "actorId": "runtime",
+      "refId": "t1"
+    },
+    {
+      "seq": 27,
+      "timestamp": "2026-10-28T12:00:26.000Z",
+      "type": "MEMORY_WRITTEN",
+      "label": "Memory written (private/episodic)",
+      "actorId": "a1",
+      "refId": "mem1"
+    },
+    {
+      "seq": 28,
+      "timestamp": "2026-10-28T12:00:27.000Z",
+      "type": "RUN_COMPLETED",
+      "label": "Run completed",
+      "actorId": "runtime",
+      "refId": null
+    }
+  ]
+}

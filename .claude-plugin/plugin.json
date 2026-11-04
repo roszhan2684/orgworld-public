@@ -1,0 +1,8 @@
+{
+  "name": "orgworld",
+  "version": "0.1.0",
+  "description": "Turn your repository into a living AI organization: persistent, self-evolving multi-agent runs you can watch in a pixel world and study as research (EvoOrg). Free local cognition by default.",
+  "author": { "name": "Roszhan Raj" },
+  "license": "MIT",
+  "keywords": ["multi-agent", "research", "evolution", "visualization", "mcp"]
+}

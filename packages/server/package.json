@@ -1,0 +1,8 @@
+{
+  "name": "@orgworld/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "@orgworld/protocol": "workspace:*", "@orgworld/core": "workspace:*", "@orgworld/store": "workspace:*", "@orgworld/metrics": "workspace:*", "ws": "8.22.0" }
+}

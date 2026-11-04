@@ -1,0 +1,6 @@
+{
+  "name": "orgworld",
+  "owner": { "name": "Roszhan Raj" },
+  "description": "OrgWorld plugin marketplace",
+  "plugins": [{ "name": "orgworld", "source": "./", "description": "Persistent, self-evolving multi-agent organizations with a live visual world." }]
+}

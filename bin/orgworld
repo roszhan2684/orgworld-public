@@ -1,0 +1,3 @@
+#!/bin/sh
+# OrgWorld CLI wrapper (plugin bin/ is added to the Bash tool PATH).
+exec node "$(dirname "$0")/../dist/orgworld.mjs" "$@"

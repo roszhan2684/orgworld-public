@@ -1,0 +1,32 @@
+# Pilot (EVOORG_RESEARCH.md II-§36): 1 model, 3 methods (+ single-agent reference), 100 tasks, 3 seeds.
+# Free local cognition only. Frozen when the experiment locks (config hash stored in the DB).
+experiment:
+  name: pilot-abrupt-shift
+  description: Does persistent organizational learning beat fixed and per-task-adaptive organizations under an abrupt task-distribution shift at matched per-task budget?
+  hypotheses: [III-H1, III-H2, FC1, FC2, FC4, FC6]
+stream:
+  kind: abrupt
+  tasks: 100
+  seed: 101
+  phases:
+    - id: A
+      mix: { implementation: 0.6, debugging: 0.3, testing: 0.1 }
+    - id: B
+      mix: { security: 0.5, implementation: 0.2, debugging: 0.2, refactoring: 0.1 }
+conditions:
+  - { id: single, condition: single-agent, preset: single-agent }
+  - { id: fixed, condition: fixed-specialist, preset: specialist-pool }
+  - { id: pertask, condition: per-task-adaptive, preset: specialist-pool }
+  - id: evoorg
+    condition: evoorg
+    preset: generalists-4
+    evolution: { trigger: { kind: periodic, everyK: 20 }, minTasksBeforeFirst: 20, bufferRecent: 4, bufferHistorical: 2, delta: 0.05 }
+  - id: random
+    condition: random-evolution
+    preset: generalists-4
+    evolution: { trigger: { kind: periodic, everyK: 20 }, minTasksBeforeFirst: 20 }
+repetitions: 3
+controls:
+  model: { provider: ollama, model: "qwen2.5-coder:7b", seed: 7, temperature: 0 }
+  budget: { perTask: { maxTokens: 60000, maxCalls: 20, maxUsd: 0.25, reserveTokens: 2500 } }
+  maxTotalUsd: 1
