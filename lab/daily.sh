@@ -14,8 +14,9 @@ source "$LAB/lab.env"
 eval "$OVERRIDES"
 NODE="${NODE_BIN:-$(command -v node)}"
 CUR="$LAB/current"   # frozen code + experiment configs (lab/setup.sh)
-NB="$LAB/notebook"   # clone of the notebook branch
-export ORGWORLD_HOME="$LAB/workspace"
+NB="$LAB/notebook"   # slim copy of the notebook branch, downloaded each session and deleted after a confirmed push
+GIT_NAME="$(sed -n 1p "$LAB/state/git-identity" 2>/dev/null)"
+GIT_EMAIL="$(sed -n 2p "$LAB/state/git-identity" 2>/dev/null)"
 STAMP="$(date +%Y%m%d-%H%M%S)-$$"
 S="$LAB/state/sessions/$STAMP"
 SJ="$S/session.json"
@@ -25,7 +26,11 @@ echo "OrgWorld lab session log: $LOG" >&2
 exec >>"$LOG" 2>&1
 
 lab() { "$NODE" "$LAB/bin/lab.mjs" "$@"; }
-ow() { "$NODE" "$CUR/orgworld.mjs" "$@"; }
+# One event store per experiment (deleted once the experiment is complete and confirmed on GitHub).
+slug() { local x="${1#experiments/}"; x="${x%.yaml}"; x="${x%.yml}"; echo "${x//\//-}"; }
+wsdir() { echo "$LAB/workspaces/$(slug "$1")"; }
+owx() { ORGWORLD_HOME="$(wsdir "$1")" "$NODE" "$CUR/orgworld.mjs" "${@:2}"; } # owx CONFIG COMMAND ARGS…
+ids() { lab get "$1" allRunIds | tr -d '[]"' | tr ',' ' '; }
 say() { echo "[$(date +%H:%M:%S)] $*"; }
 notify() { command -v osascript >/dev/null && osascript -e "display notification \"$1\" with title \"OrgWorld lab\"" >/dev/null 2>&1 || true; }
 now_utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -42,32 +47,110 @@ cleanup() {
   [[ -n "$WD_PID" ]] && { pkill -P "$WD_PID" 2>/dev/null; kill "$WD_PID" 2>/dev/null; }
   [[ -n "$EXP_PID" ]] && kill "$EXP_PID" 2>/dev/null
   [[ -n "$OLLAMA_PID" ]] && kill "$OLLAMA_PID" 2>/dev/null
+  [[ "${REMOVE_SESSION:-0}" == 1 ]] && rm -rf "$S"
   rm -rf "$LOCK"
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-publish() {
-  cd "$NB" || { say "no notebook clone at $NB"; return; }
-  git pull -q --rebase origin "$NOTEBOOK_BRANCH" || say "pull failed (offline?); committing locally"
-  local name; name="$(lab get "$S/after.json" name)"
-  if [[ -n "$name" ]]; then
-    mkdir -p "data/$name/runs"
-    [[ -f "$S/results.csv" ]] && cp "$S/results.csv" "data/$name/results.csv"
-    find "$S/runs" -name '*.zip' -exec mv {} "data/$name/runs/" \;
+nb_open() {
+  if [[ -d "$NB/.git" ]]; then
+    git -C "$NB" pull -q --rebase origin "$NOTEBOOK_BRANCH" || say "pull failed (offline?)"
+  else
+    rm -rf "$NB"
+    git clone -q --depth 1 --filter=blob:none --sparse --branch "$NOTEBOOK_BRANCH" "$REPO_URL" "$NB" || return 1
+    # Run exports stay on GitHub only: they are never downloaded back.
+    git -C "$NB" sparse-checkout set --no-cone '/*' '!/data/*/runs/' || return 1
   fi
-  local file; file="$(lab render "$S" "$NB")" || { say "render failed"; return; }
+  git -C "$NB" config user.name "$GIT_NAME"
+  git -C "$NB" config user.email "$GIT_EMAIL"
+  printf '%s\n' '#!/bin/sh' "git diff --cached --name-only -z --diff-filter=ACMR | ORGWORLD_LAB=\"$LAB\" xargs -0 \"$LAB/bin/privacy-check.sh\" || { echo 'pre-commit: private text found; nothing committed' >&2; exit 1; }" >"$NB/.git/hooks/pre-commit"
+  chmod +x "$NB/.git/hooks/pre-commit"
+}
+
+# Export every run of the experiment that is not on GitHub yet (counted, excluded, validation shadows).
+export_runs() {
+  local name="$1" cfg="$2" dir="$NB/data/$1/runs" have id f why
+  mkdir -p "$dir"
+  have="$(git -C "$NB" ls-tree -r --name-only HEAD -- "data/$name/runs/" 2>/dev/null)"
+  for id in $(ids "$S/after.json"); do
+    f="$id.orgworld-run.zip"
+    grep -qxF "data/$name/runs/$f" <<<"$have" && continue
+    [[ -f "$LAB/unpublished/$f" ]] && continue
+    owx "$cfg" export --run "$id" --out "$dir/$f" >/dev/null || { say "export failed: $id"; continue; }
+    why=""
+    "$LAB/bin/privacy-check.sh" "$dir/$f" >/dev/null 2>&1 || why="it contains a private path or address"
+    (($(stat -f %z "$dir/$f") > 50000000)) && why="it is larger than 50 MB"
+    if [[ -n "$why" ]]; then
+      mv "$dir/$f" "$LAB/unpublished/"
+      lab push "$SJ" unpublished "{\"file\":\"$f\",\"reason\":\"$why\"}" json
+    else
+      lab push "$SJ" exported "$f"
+    fi
+  done
+}
+
+# A complete experiment whose runs and readings are all on GitHub no longer needs its local database.
+archive_finished() {
+  local c ws name have id missing
+  for c in $QUEUE; do
+    ws="$(wsdir "$c")"
+    [[ -d "$ws" ]] || continue
+    owx "$c" readings "$CUR/$c" --out "$S/archive.json" >/dev/null 2>&1 || continue
+    [[ "$(lab get "$S/archive.json" done)" == true ]] || continue
+    name="$(lab get "$S/archive.json" name)"
+    have="$(git -C "$NB" ls-tree -r --name-only HEAD -- "data/$name/")"
+    missing=0
+    grep -qxF "data/$name/readings.json" <<<"$have" || missing=1
+    for id in $(ids "$S/archive.json"); do grep -qxF "data/$name/runs/$id.orgworld-run.zip" <<<"$have" || missing=1; done
+    if ((missing)); then say "$name is complete but not all of it is on GitHub; its database is kept"; continue; fi
+    mkdir -p "$LAB/state/done"
+    cp "$S/archive.json" "$LAB/state/done/$(slug "$c").json"
+    rm -rf "$ws"
+    say "$name: complete and confirmed on GitHub; local database removed"
+  done
+}
+
+# After a confirmed push: remove what the next session does not need.
+tidy() {
+  cd "$LAB" || return
+  rm -rf "$NB"
+  find "$LAB/logs" -type f -name '*.log' -mtime +14 -delete 2>/dev/null
+  find "$LAB/state/sessions" -mindepth 1 -maxdepth 1 -type d ! -name "$STAMP" -exec rm -rf {} + 2>/dev/null
+  REMOVE_SESSION=1
+}
+
+publish() {
+  nb_open || { say "could not download the notebook (offline?); this session is not published, its files stay in $S"; return; }
+  cd "$NB" || return
+  local name file progress="" pushed=0
+  name="$(lab get "$S/after.json" name)"
+  if [[ -n "$name" && "$(lab get "$SJ" outcome)" == ran ]]; then
+    export_runs "$name" "$(lab get "$SJ" config)"
+    [[ -f "$S/results.csv" ]] && cp "$S/results.csv" "data/$name/results.csv"
+  fi
+  file="$(lab render "$S" "$NB")" || { say "render failed"; return; }
   git add -A
+  # New run exports sit outside the sparse checkout (only they exist locally), so they are added explicitly.
+  [[ -n "$name" && -d "data/$name/runs" ]] && git add --sparse -- "data/$name/runs"
   if ! git diff --cached --name-only -z --diff-filter=ACMR | xargs -0 "$LAB/bin/privacy-check.sh"; then
     git reset -q
     say "privacy check failed; nothing committed"
     notify "Lab notebook NOT published: a file contains private text. See the log in ~/orgworld-lab/logs."
     return
   fi
-  local progress=""; [[ -n "$name" ]] && progress=" · $name $(lab get "$S/after.json" completed)/$(lab get "$S/after.json" planned)"
+  [[ -n "$name" ]] && progress=" · $name $(lab get "$S/after.json" completed)/$(lab get "$S/after.json" planned)"
   git commit -q -m "Lab session $(lab get "$SJ" date): $(lab get "$SJ" outcome)$progress" || say "nothing to commit"
   if [[ "${PUSH:-1}" == 1 ]]; then
-    if git push -q origin "HEAD:$NOTEBOOK_BRANCH" || { git pull -q --rebase origin "$NOTEBOOK_BRANCH" && git push -q origin "HEAD:$NOTEBOOK_BRANCH"; }; then say "pushed $file"; else say "push failed; the next session pushes it"; fi
+    git push -q origin "HEAD:$NOTEBOOK_BRANCH" || { git pull -q --rebase origin "$NOTEBOOK_BRANCH" && git push -q origin "HEAD:$NOTEBOOK_BRANCH"; }
+    [[ "$(git ls-remote origin "refs/heads/$NOTEBOOK_BRANCH" | cut -f1)" == "$(git rev-parse HEAD)" ]] && pushed=1
+  fi
+  if ((pushed)); then
+    say "pushed $file (confirmed by GitHub)"
+    archive_finished
+    tidy
+  else
+    say "push not confirmed; everything is kept locally and the next session pushes it"
   fi
   notify "Session $(lab get "$SJ" outcome)$progress"
 }
@@ -101,12 +184,17 @@ eval "$(lab window "$START_TIME" "$STOP_AT" "$HARD_STOP_AT")"
 POWER="$(pmset -g batt 2>/dev/null | head -1 | sed -E "s/.*'(.*)'.*/\1/")"
 lab set "$SJ" power "$POWER"
 [[ "${REQUIRE_AC_POWER:-1}" != 1 || "$POWER" != "Battery Power" ]] || finish skipped "On battery power (REQUIRE_AC_POWER=1)."
+FREE_GB="$(df -g "$LAB" | awk 'NR==2 {print $4}')"
+lab set "$SJ" freeDiskGB "$FREE_GB" json
+((FREE_GB >= ${MIN_FREE_GB:-5})) || finish skipped "Less than ${MIN_FREE_GB:-5} GB of free disk space."
 
 # 2. Next unfinished experiment in the queue.
 CFG=""
 for c in $QUEUE; do
   [[ -f "$CUR/$c" ]] || finish blocked "Queued config $c is not in the frozen code; re-run lab/setup.sh --refreeze after committing it."
-  ow readings "$CUR/$c" --out "$S/before.json" >/dev/null || finish blocked "Could not read progress for $c (see the local log)."
+  [[ -f "$LAB/state/done/$(slug "$c").json" ]] && continue # complete, on GitHub, local database removed
+  [[ -d "$(wsdir "$c")" ]] || owx "$c" init >/dev/null || finish blocked "Could not create a workspace for $c (see the local log)."
+  owx "$c" readings "$CUR/$c" --out "$S/before.json" >/dev/null || finish blocked "Could not read progress for $c (see the local log)."
   if [[ "$(lab get "$S/before.json" done)" != true ]]; then CFG="$c"; break; fi
 done
 [[ -n "$CFG" ]] || finish queue-finished "Every queued experiment is complete. Review the results, then add the next config to QUEUE in ~/orgworld-lab/lab.env."
@@ -159,6 +247,7 @@ say "running $CFG; no new run after $STOP_AT; hard stop $HARD_STOP_AT (in ${SECS
 OLOG="$HOME/.ollama/logs/server.log"
 OLOG_START="$(stat -f %z "$OLOG" 2>/dev/null || echo 0)"
 # Started directly (not through a shell function) so that $! is the experiment process itself.
+export ORGWORLD_HOME; ORGWORLD_HOME="$(wsdir "$CFG")"
 "$NODE" "$CUR/orgworld.mjs" experiment "$CUR/$CFG" --stop-at "$STOP_AT" >"$S/experiment.out" 2>&1 &
 EXP_PID=$!
 caffeinate -i -s -w "$EXP_PID" &
@@ -189,23 +278,7 @@ case "$HARD:$STATUS" in
   *) STOP="the experiment process exited with code $RC (see the local log)" ;;
 esac
 lab set "$SJ" stopReason "$STOP"
-ow readings "$CUR/$CFG" --out "$S/after.json" --csv "$S/results.csv" >/dev/null || say "readings failed"
+owx "$CFG" readings "$CUR/$CFG" --out "$S/after.json" --csv "$S/results.csv" >/dev/null || say "readings failed"
 
-# Export every run not yet in the notebook (counted, excluded, validation shadows) after a privacy and size check.
-NAME="$(lab get "$S/after.json" name)"
-for id in $(lab get "$S/after.json" allRunIds | tr -d '[]"' | tr ',' ' '); do
-  f="$id.orgworld-run.zip"
-  [[ -f "$NB/data/$NAME/runs/$f" || -f "$LAB/unpublished/$f" ]] && continue
-  ow export --run "$id" --out "$S/runs/$f" >/dev/null || { say "export failed: $id"; continue; }
-  why=""
-  "$LAB/bin/privacy-check.sh" "$S/runs/$f" >/dev/null || why="it contains a private path or address"
-  (($(stat -f %z "$S/runs/$f") > 50000000)) && why="it is larger than 50 MB"
-  if [[ -n "$why" ]]; then
-    mv "$S/runs/$f" "$LAB/unpublished/"
-    lab push "$SJ" unpublished "{\"file\":\"$f\",\"reason\":\"$why\"}" json
-  else
-    lab push "$SJ" exported "$f"
-  fi
-done
-
+# Run exports, the privacy check and the push happen in publish (finish → publish).
 finish ran

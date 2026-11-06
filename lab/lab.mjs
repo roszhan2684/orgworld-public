@@ -113,7 +113,7 @@ function render(dir, nb) {
   if (after) rows.push(['Experiment', `${after.name} · \`${after.experimentId}\` · config hash \`${after.configHash.slice(0, 16)}…\` · [config](${repo}/blob/${frozen.commit ?? 'main'}/${s.config}) · locked ${after.lockedAt ?? 'not yet'}`]);
   if (ol && !ol.error) rows.push(['Model', `${ol.model} · digest \`${(ol.digest ?? '').slice(0, 16)}…\` · ${ol.parameters ?? ''} ${ol.quantization ?? ''} · Ollama ${ol.version} · context ${ol.contextLength ?? '?'} tokens · GPU offload ${Math.round((ol.gpuFraction ?? 0) * 100)}% · warm-up ${num(ol.warmup?.genTokensPerSec, 1)} tok/s generation, ${num(ol.warmup?.promptTokensPerSec, 1)} tok/s prompt`]);
   else if (ol?.error) rows.push(['Model', ol.error]);
-  if (env) rows.push(['Machine', `${env.machine} · macOS ${env.macos} · Node ${env.nodeVersion} · ${s.power ?? ''}`]);
+  if (env) rows.push(['Machine', `${env.machine} · macOS ${env.macos} · Node ${env.nodeVersion} · ${s.power ?? ''}${s.freeDiskGB != null ? ` · ${s.freeDiskGB} GB free disk` : ''}`]);
   if (s.outcome === 'ran') rows.push(['Model-service retries', String(s.retries ?? 0)], ['Prompts truncated by Ollama', String(s.truncatedPrompts ?? '—')]);
   L.push(table(['', ''], rows), '');
 

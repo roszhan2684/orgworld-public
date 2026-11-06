@@ -21,6 +21,19 @@ The lab runs the pre-registered experiments a little each night on a free local 
    - the index.
 7. **Publishes.** Every file passes a privacy check first, which blocks the machine's home path, the researcher's email and the private research dossier. Then the session is committed and pushed to `lab-notebook`.
 
+**Storage.** The Mac keeps only what the next session needs:
+- the event store of each unfinished experiment (`~/orgworld-lab/workspaces/<experiment>/`);
+- the frozen code;
+- the settings;
+- the model.
+
+Each session downloads a slim copy of the notebook (pages and readings only; run exports are never downloaded back). It adds the new run exports, pushes, and confirms the push with GitHub before deleting anything. After that confirmation it deletes:
+- the notebook copy and the session's working files;
+- logs older than 14 days;
+- for a complete experiment whose every run export is on GitHub, its whole event store. A small note in `state/done/` keeps that experiment from running again.
+
+If the push isn't confirmed, nothing is deleted and the next session pushes it. If less than `MIN_FREE_GB` (default 5 GB) is free, the session is skipped.
+
 Sessions that don't run anything (skipped, blocked, queue finished) are published once. If the next one repeats the same outcome for the same reason, it is only logged locally.
 
 ## Set up (once)
@@ -40,7 +53,7 @@ From the repo, once the commit you want to run is on `origin/main`. Setup builds
 lab/setup.sh
 ```
 
-`setup.sh` freezes the code (bundle plus `experiments/`) into `~/orgworld-lab/current` and creates a separate event store in `~/orgworld-lab/workspace`. It also clones the notebook branch into `~/orgworld-lab/notebook` and writes the settings file `~/orgworld-lab/lab.env`. It prints two commands that switch on the nightly job:
+`setup.sh` freezes the code (bundle plus `experiments/`) into `~/orgworld-lab/current` and creates `~/orgworld-lab/workspaces/` for the per-experiment event stores, creates the notebook branch if it doesn't exist yet, and writes the settings file `~/orgworld-lab/lab.env`. It prints two commands that switch on the nightly job:
 
 ```bash
 cp ~/orgworld-lab/org.orgworld.lab.plist ~/Library/LaunchAgents/

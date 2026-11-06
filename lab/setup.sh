@@ -54,39 +54,36 @@ else
   echo "froze $COMMIT → $D"
 fi
 
-# 4. Workspace (event store) for lab sessions, separate from the repo's own .orgworld/.
-[[ -d "$LAB/workspace" ]] || ORGWORLD_HOME="$LAB/workspace" "$NODE" "$LAB/current/orgworld.mjs" init >/dev/null
-echo "workspace: $LAB/workspace"
+# 4. Event stores: one per experiment under workspaces/, created by the first session that runs it and deleted once
+#    the experiment is complete and confirmed on GitHub.
+mkdir -p "$LAB/workspaces"
+[[ -d "$LAB/workspace" ]] && echo "note: $LAB/workspace is no longer used (one store per experiment in workspaces/); delete it once you have checked it holds nothing you need"
 
-# 5. Notebook: a clone of the notebook branch, with a pre-commit privacy check.
+# 5. Notebook branch. Sessions download a slim copy each night and delete it after a confirmed push.
 # shellcheck source=/dev/null
 source "$LAB/lab.env"
 NBR="${NOTEBOOK_BRANCH:-lab-notebook}"
-if [[ ! -d "$LAB/notebook/.git" ]]; then
-  if git ls-remote --exit-code --heads origin "$NBR" >/dev/null 2>&1; then
-    git clone -q --branch "$NBR" --single-branch "$URL" "$LAB/notebook"
-  else
-    git init -q -b "$NBR" "$LAB/notebook"
-    git -C "$LAB/notebook" remote add origin "$URL"
-    touch "$LAB/notebook/sessions.jsonl"
-    "$NODE" "$LAB/bin/lab.mjs" index "$LAB/notebook" "${URL%.git}"
-  fi
-fi
-git -C "$LAB/notebook" config user.name "$(git config user.name)"
-git -C "$LAB/notebook" config user.email "$(git config user.email)"
-cat >"$LAB/notebook/.git/hooks/pre-commit" <<EOF
-#!/bin/sh
-# Refuse to commit anything containing the lab machine's home path, the researcher's email or the private dossier.
-git diff --cached --name-only -z --diff-filter=ACMR | ORGWORLD_LAB="$LAB" xargs -0 "$LAB/bin/privacy-check.sh" || { echo "pre-commit: private text found; nothing committed" >&2; exit 1; }
-EOF
-chmod +x "$LAB/notebook/.git/hooks/pre-commit"
-if [[ -z "$(git -C "$LAB/notebook" rev-list -n1 --all 2>/dev/null)" ]]; then
-  git -C "$LAB/notebook" add -A
-  git -C "$LAB/notebook" commit -q -m "Start the lab notebook"
-  git -C "$LAB/notebook" push -q -u origin "$NBR"
+printf '%s\n%s\n' "$(git config user.name)" "$(git config user.email)" >"$LAB/state/git-identity"
+if ! git ls-remote --exit-code --heads origin "$NBR" >/dev/null 2>&1; then
+  T="$(mktemp -d)"
+  git init -q -b "$NBR" "$T"
+  touch "$T/sessions.jsonl"
+  "$NODE" "$LAB/bin/lab.mjs" index "$T" "${URL%.git}"
+  git -C "$T" add -A
+  git -C "$T" -c user.name="$(git config user.name)" -c user.email="$(git config user.email)" commit -q -m "Start the lab notebook"
+  git -C "$T" push -q "$URL" "HEAD:refs/heads/$NBR"
+  rm -rf "$T"
   echo "created branch $NBR on origin"
 fi
-echo "notebook: $LAB/notebook (branch $NBR)"
+if [[ -d "$LAB/notebook/.git" ]]; then
+  # Older setups kept a permanent clone; remove it if it has nothing unpushed.
+  if [[ -z "$(git -C "$LAB/notebook" status --porcelain)" ]] && git -C "$LAB/notebook" fetch -q origin "$NBR" && [[ -z "$(git -C "$LAB/notebook" log --oneline FETCH_HEAD..HEAD)" ]]; then
+    rm -rf "$LAB/notebook"
+  else
+    echo "note: $LAB/notebook has unpushed changes; the next session pushes them"
+  fi
+fi
+echo "notebook: branch $NBR on origin"
 
 # 6. launchd job, written but not activated.
 H="${START_TIME%%:*}" M="${START_TIME##*:}"
