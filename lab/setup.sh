@@ -16,10 +16,12 @@ mkdir -p "$LAB/bin" "$LAB/frozen" "$LAB/state" "$LAB/logs" "$LAB/unpublished"
 cp lab/daily.sh lab/lab.mjs lab/privacy-check.sh "$LAB/bin/"
 chmod +x "$LAB/bin/daily.sh" "$LAB/bin/privacy-check.sh"
 
-# 2. Settings and privacy patterns.
+# 2. Settings and privacy patterns (existing patterns are kept, so you can add your own, one per line).
 URL="$(git remote get-url origin)"
 [[ -f "$LAB/lab.env" ]] || sed "s|@REPO_URL@|${URL%.git}|" lab/lab.env.example >"$LAB/lab.env"
+touch "$LAB/state/privacy-patterns"
 {
+  cat "$LAB/state/privacy-patterns"
   echo "/Users/"
   echo "$HOME"
   echo "EVOORG_RESEARCH"
@@ -27,7 +29,8 @@ URL="$(git remote get-url origin)"
   for e in "$(git config --global user.email || true)" "$(git config user.email || true)"; do
     if [[ -n "$e" && "$e" != *noreply* ]]; then echo "$e"; fi
   done
-} | sort -u >"$LAB/state/privacy-patterns"
+} | grep -v '^$' | sort -u >"$LAB/state/privacy-patterns.new"
+mv "$LAB/state/privacy-patterns.new" "$LAB/state/privacy-patterns"
 
 # 3. Frozen code: the experiment runs this bundle and these configs until you refreeze.
 if [[ -L "$LAB/current" && "${1:-}" != --refreeze ]]; then
