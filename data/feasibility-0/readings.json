@@ -1,0 +1,238 @@
+{
+  "experimentId": "exp_a7788fdd09dd",
+  "name": "feasibility-0",
+  "configHash": "a7788fdd09dd59aa85b6a193",
+  "model": {
+    "provider": "ollama",
+    "model": "qwen2.5-coder:7b",
+    "temperature": 0,
+    "seed": 7,
+    "maxOutputTokensPerCall": 2048
+  },
+  "lockedAt": null,
+  "storedStatus": null,
+  "planned": 3,
+  "completed": 0,
+  "done": false,
+  "slots": [
+    {
+      "slot": "exp_a7788fdd09dd-fixed-r1",
+      "conditionId": "fixed",
+      "repetition": 1,
+      "runId": "exp_a7788fdd09dd-fixed-r1",
+      "attempt": 1,
+      "pending": true,
+      "status": null,
+      "excluded": [],
+      "startedAt": null,
+      "finishedAt": null,
+      "wallSeconds": null,
+      "tasks": null,
+      "successRate": null,
+      "cumulativeReward": null,
+      "tokens": null,
+      "modelCalls": null,
+      "usd": null,
+      "generation": null,
+      "mutationsAccepted": null,
+      "mutationsRejected": null,
+      "modelCallFailures": null,
+      "agentFailures": null
+    },
+    {
+      "slot": "exp_a7788fdd09dd-pertask-r1",
+      "conditionId": "pertask",
+      "repetition": 1,
+      "runId": "exp_a7788fdd09dd-pertask-r1",
+      "attempt": 1,
+      "pending": true,
+      "status": null,
+      "excluded": [],
+      "startedAt": null,
+      "finishedAt": null,
+      "wallSeconds": null,
+      "tasks": null,
+      "successRate": null,
+      "cumulativeReward": null,
+      "tokens": null,
+      "modelCalls": null,
+      "usd": null,
+      "generation": null,
+      "mutationsAccepted": null,
+      "mutationsRejected": null,
+      "modelCallFailures": null,
+      "agentFailures": null
+    },
+    {
+      "slot": "exp_a7788fdd09dd-evoorg-r1",
+      "conditionId": "evoorg",
+      "repetition": 1,
+      "runId": "exp_a7788fdd09dd-evoorg-r1",
+      "attempt": 1,
+      "pending": true,
+      "status": null,
+      "excluded": [],
+      "startedAt": null,
+      "finishedAt": null,
+      "wallSeconds": null,
+      "tasks": null,
+      "successRate": null,
+      "cumulativeReward": null,
+      "tokens": null,
+      "modelCalls": null,
+      "usd": null,
+      "generation": null,
+      "mutationsAccepted": null,
+      "mutationsRejected": null,
+      "modelCallFailures": null,
+      "agentFailures": null
+    }
+  ],
+  "shadowRuns": 0,
+  "allRunIds": [],
+  "scripted": false,
+  "conditions": [
+    {
+      "conditionId": "fixed",
+      "condition": "fixed-specialist",
+      "runs": [],
+      "cumulativeReward": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "successRate": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "lifetimeTokens": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "lifetimeUsd": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "reviewerCoverage": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "securitySuccess": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      }
+    },
+    {
+      "conditionId": "pertask",
+      "condition": "per-task-adaptive",
+      "runs": [],
+      "cumulativeReward": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "successRate": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "lifetimeTokens": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "lifetimeUsd": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "reviewerCoverage": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "securitySuccess": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      }
+    },
+    {
+      "conditionId": "evoorg",
+      "condition": "evoorg",
+      "runs": [],
+      "cumulativeReward": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "successRate": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "lifetimeTokens": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "lifetimeUsd": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "reviewerCoverage": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "securitySuccess": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      }
+    }
+  ],
+  "comparisons": []
+}
