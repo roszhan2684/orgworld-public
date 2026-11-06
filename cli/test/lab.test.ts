@@ -48,8 +48,8 @@ describe('lab helper', () => {
     write(join(s, 'before.json'), readings([slot(1, { pending: true, status: null, runId: 'exp_x-fixed-r1' }), slot(2, { pending: true, status: null })], 0));
     write(join(s, 'after.json'), readings([slot(1, { runId: 'exp_x-fixed-r1-a2', attempt: 2, excluded: [{ runId: 'exp_x-fixed-r1', reason: 'interrupted (status running)', tasks: 7, wallSeconds: 300 }] }), slot(2, { pending: true, status: null })], 1));
     write(join(s, 'frozen.json'), { commit: 'c'.repeat(40), bundleSha256: 'f'.repeat(64) });
-    write(join(s, 'ollama.json'), { model: 'qwen2.5-coder:7b', version: '0.21.0', digest: 'd'.repeat(64), gpuFraction: 1, warmup: { genTokensPerSec: 50, promptTokensPerSec: 400 } });
-    write(join(s, 'session.json'), { date: '2026-11-06', startedAt: '2026-11-06T09:00:00Z', endedAt: '2026-11-06T14:00:00Z', window: '01:00–06:30, hard stop 07:30', repoUrl: 'https://github.com/o/r', config: 'experiments/pilot/feasibility.yaml', outcome: 'ran', stopReason: 'time window closing at 06:30', retries: 3, notes: ['exp_x-fixed-r1 kept but excluded'], exported: ['a.zip'], provenanceFile: join(s, 'prov-state.json') });
+    write(join(s, 'ollama.json'), { model: 'qwen2.5-coder:7b', version: '0.21.0', digest: 'd'.repeat(64), gpuFraction: 1, contextLength: 4096, warmup: { genTokensPerSec: 50, promptTokensPerSec: 400 } });
+    write(join(s, 'session.json'), { date: '2026-11-06', startedAt: '2026-11-06T09:00:00Z', endedAt: '2026-11-06T14:00:00Z', window: '01:00–06:30, hard stop 07:30', repoUrl: 'https://github.com/o/r', config: 'experiments/pilot/feasibility.yaml', outcome: 'ran', stopReason: 'time window closing at 06:30', retries: 3, truncatedPrompts: 2, notes: ['exp_x-fixed-r1 kept but excluded'], exported: ['a.zip'], provenanceFile: join(s, 'prov-state.json') });
     write(join(s, 'prov-state.json'), { modelDigest: 'd' });
     expect(lab(['render', s, nb]).trim()).toBe('sessions/2026-11-06.md');
     const page = readFileSync(join(nb, 'sessions/2026-11-06.md'), 'utf8');
@@ -58,7 +58,9 @@ describe('lab helper', () => {
     expect(page).toContain('| `fixed-r1-a2` | fixed | 1 | completed | 20 | 0.50 | 9.50 | 120,000 | 140 | 2 | 1 | 0/0 | 10 min | 30 s | ✓ |');
     expect(page).toContain('- `exp_x-fixed-r1`: interrupted (status running); 7 task(s), 5 min **(this session)**');
     expect(page).toContain('## Interim aggregates (not results)');
-    expect(page).toContain('GPU offload 100%');
+    expect(page).toContain('context 4096 tokens · GPU offload 100%');
+    expect(page).toContain('| Prompts truncated by Ollama | 2 |');
+    expect(page).toContain('Ollama truncated 2 prompt(s) to its 4096-token context');
     expect(page).not.toContain(s);
     expect(existsSync(join(nb, 'data/feasibility-0/readings.json'))).toBe(true);
     expect(existsSync(join(nb, 'data/feasibility-0/provenance.json'))).toBe(true);

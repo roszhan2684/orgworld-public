@@ -45,6 +45,7 @@ async function ollamaInfo(model, out) {
       };
       const loaded = ((await call('/api/ps')).models ?? []).find((p) => p.name === model || p.model === model);
       info.gpuFraction = loaded?.size ? (loaded.size_vram ?? 0) / loaded.size : 0;
+      info.contextLength = loaded?.context_length ?? null; // tokens; longer prompts are truncated by Ollama
     }
   } catch (e) {
     info.error = `Ollama is not reachable at ${host}: ${e.message}`;
@@ -54,7 +55,7 @@ async function ollamaInfo(model, out) {
 
 /** Fields that define the experiment's environment. A blocking change stops the experiment; others are deviations. */
 const BLOCKING = ['bundleSha256', 'model', 'modelDigest'];
-const RECORDED = ['ollamaVersion', 'nodeVersion', 'macos', 'machine'];
+const RECORDED = ['ollamaVersion', 'contextLength', 'nodeVersion', 'macos', 'machine'];
 
 function provenance(statePath, curPath, date, accept) {
   const cur = readJson(curPath);
@@ -110,10 +111,10 @@ function render(dir, nb) {
     ['Code', frozen.commit ? `OrgWorld [\`${frozen.commit.slice(0, 7)}\`](${repo}/tree/${frozen.commit}) · bundle sha256 \`${(frozen.bundleSha256 ?? '').slice(0, 16)}…\`` : '—'],
   ];
   if (after) rows.push(['Experiment', `${after.name} · \`${after.experimentId}\` · config hash \`${after.configHash.slice(0, 16)}…\` · [config](${repo}/blob/${frozen.commit ?? 'main'}/${s.config}) · locked ${after.lockedAt ?? 'not yet'}`]);
-  if (ol && !ol.error) rows.push(['Model', `${ol.model} · digest \`${(ol.digest ?? '').slice(0, 16)}…\` · ${ol.parameters ?? ''} ${ol.quantization ?? ''} · Ollama ${ol.version} · GPU offload ${Math.round((ol.gpuFraction ?? 0) * 100)}% · warm-up ${num(ol.warmup?.genTokensPerSec, 1)} tok/s generation, ${num(ol.warmup?.promptTokensPerSec, 1)} tok/s prompt`]);
+  if (ol && !ol.error) rows.push(['Model', `${ol.model} · digest \`${(ol.digest ?? '').slice(0, 16)}…\` · ${ol.parameters ?? ''} ${ol.quantization ?? ''} · Ollama ${ol.version} · context ${ol.contextLength ?? '?'} tokens · GPU offload ${Math.round((ol.gpuFraction ?? 0) * 100)}% · warm-up ${num(ol.warmup?.genTokensPerSec, 1)} tok/s generation, ${num(ol.warmup?.promptTokensPerSec, 1)} tok/s prompt`]);
   else if (ol?.error) rows.push(['Model', ol.error]);
   if (env) rows.push(['Machine', `${env.machine} · macOS ${env.macos} · Node ${env.nodeVersion} · ${s.power ?? ''}`]);
-  if (s.outcome === 'ran') rows.push(['Model-service retries', String(s.retries ?? 0)]);
+  if (s.outcome === 'ran') rows.push(['Model-service retries', String(s.retries ?? 0)], ['Prompts truncated by Ollama', String(s.truncatedPrompts ?? '—')]);
   L.push(table(['', ''], rows), '');
 
   if (after && s.outcome !== 'skipped') {
@@ -162,6 +163,7 @@ function render(dir, nb) {
   const devs = [];
   if (prov?.status === 'deviation') for (const c of prov.changes) devs.push(`${c.field} changed: \`${c.from}\` → \`${c.to}\`${c.blocking ? ' (accepted by the researcher)' : ''}`);
   if (prov?.status === 'blocked') for (const c of prov.changes) devs.push(`${c.blocking ? '**Blocking**' : 'Recorded'}: ${c.field} changed \`${c.from}\` → \`${c.to}\``);
+  if (s.truncatedPrompts > 0) devs.push(`Ollama truncated ${s.truncatedPrompts} prompt(s) to its ${ol?.contextLength ?? '?'}-token context: those agents did not see their whole prompt.`);
   if (s.hardStopped) devs.push('The hard stop ended the session mid-run; that run is kept, excluded and re-run from the start next session.');
   for (const u of s.unpublished ?? []) devs.push(`Run export \`${u.file}\` not published: ${u.reason}. It stays on the lab machine.`);
   if (notes.length) L.push('## Notes from the runner', '', ...notes.map((n) => `- ${n}`), '');

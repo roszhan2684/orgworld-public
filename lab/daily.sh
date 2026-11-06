@@ -142,6 +142,7 @@ cat >"$S/env.json" <<EOF
   "model": "$MODEL",
   "modelDigest": "$(lab get "$S/ollama.json" digest)",
   "ollamaVersion": "$(lab get "$S/ollama.json" version)",
+  "contextLength": "$(lab get "$S/ollama.json" contextLength)",
   "nodeVersion": "$("$NODE" --version)",
   "macos": "$(sw_vers -productVersion)",
   "machine": "$(sysctl -n hw.model), $(sysctl -n machdep.cpu.brand_string), $(($(sysctl -n hw.memsize) / 1073741824)) GB"
@@ -155,6 +156,8 @@ lab provenance "$PROV" "$S/env.json" "$(lab get "$SJ" date)" >"$S/prov.json"
 # 5. Run until the window closes. Runs are atomic: the CLI starts no run that would not finish by STOP_AT, and the
 #    watchdog stops anything still running at HARD_STOP_AT (that run is kept, excluded, and re-run next session).
 say "running $CFG; no new run after $STOP_AT; hard stop $HARD_STOP_AT (in ${SECS_TO_HARD}s)"
+OLOG="$HOME/.ollama/logs/server.log"
+OLOG_START="$(stat -f %z "$OLOG" 2>/dev/null || echo 0)"
 # Started directly (not through a shell function) so that $! is the experiment process itself.
 "$NODE" "$CUR/orgworld.mjs" experiment "$CUR/$CFG" --stop-at "$STOP_AT" >"$S/experiment.out" 2>&1 &
 EXP_PID=$!
@@ -173,6 +176,9 @@ STATUS="$(sed -n 's/^status: //p' "$S/experiment.out" | tail -1)"
 lab set "$SJ" hardStopped "$HARD" json
 lab set "$SJ" exitCode "$RC" json
 lab set "$SJ" retries "$(grep -c 'model call failed (attempt' "$S/experiment.out")" json
+# Ollama logs every request with "truncated = 0|1"; count the truncated ones written during this session.
+TRUNC="$(tail -c +"$((OLOG_START + 1))" "$OLOG" 2>/dev/null | grep -c 'truncated = 1')"
+lab set "$SJ" truncatedPrompts "${TRUNC:-0}" json
 while IFS= read -r n; do lab push "$SJ" notes "$n"; done < <(sed -n 's/^note: //p' "$S/experiment.out")
 case "$HARD:$STATUS" in
   true:*) STOP="hard stop at $HARD_STOP_AT" ;;
