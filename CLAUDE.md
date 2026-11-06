@@ -18,7 +18,8 @@ REAL AGENT ACTION → REAL STATE CHANGE → RECORDED EVENT → PERSISTED DATA �
 
 ## Commands
 - `pnpm install` · `pnpm typecheck` · `pnpm test` · `pnpm build` (bundles `dist/`)
-- `node dist/orgworld.mjs doctor|init|run|status|watch|replay|export|why|experiment`
+- `node dist/orgworld.mjs doctor|init|run|status|watch|replay|export|why|experiment|readings`
+- Nightly lab: `lab/setup.sh` (freeze code, notebook clone, launchd file) · `~/orgworld-lab/bin/daily.sh` (one session) · settings `~/orgworld-lab/lab.env`; readings go to the `lab-notebook` branch
 - `claude plugin validate .`
 
 ## Standards

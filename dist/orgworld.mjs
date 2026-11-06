@@ -37641,6 +37641,69 @@ function unusableReason(store, runId, status) {
   }
   return `interrupted (status ${status})`;
 }
+function experimentIdOf(config2) {
+  return `exp_${hashObject(ExperimentConfig.parse(config2)).slice(0, 12)}`;
+}
+function currentAttempt(store, base) {
+  const excluded = [];
+  let runId = base;
+  for (let attempt = 1; ; attempt++) {
+    const row = store.getRun(runId);
+    const reason = row ? unusableReason(store, runId, row.status) : null;
+    if (!reason) return { runId, attempt, excluded };
+    excluded.push({ runId, reason });
+    runId = `${base}-a${attempt + 1}`;
+  }
+}
+var isShadow = (r2) => r2.label?.startsWith("validation shadow") ?? false;
+var wallMs = (r2) => Date.parse(r2.updatedAt) - Date.parse(r2.createdAt);
+function expectedRunMs(store, experimentId, conditionId) {
+  const done = store.listRuns({ experimentId }).filter((r2) => r2.status === "completed" && !isShadow(r2));
+  const longest = (rs) => rs.length ? Math.max(...rs.map(wallMs)) : null;
+  return longest(done.filter((r2) => r2.label?.includes(` \xB7 ${conditionId} \xB7 `))) ?? longest(done);
+}
+function aggregate(store, cfg, runsBy) {
+  const conditions = cfg.conditions.map((c) => {
+    const runs = runsBy[c.id] ?? [];
+    const metrics = runs.map((id2) => runMetrics(store.events(id2)));
+    return {
+      conditionId: c.id,
+      condition: c.condition,
+      runs,
+      metrics,
+      cumulativeReward: ci95(metrics.map((m) => m.cumulativeReward)),
+      successRate: ci95(metrics.map((m) => m.successRate)),
+      lifetimeTokens: ci95(metrics.map((m) => m.lifetime.tokens)),
+      lifetimeUsd: ci95(metrics.map((m) => m.lifetime.usd)),
+      reviewerCoverage: ci95(metrics.map((m) => m.verification.rate)),
+      securitySuccess: ci95(metrics.map(COMPARISON_METRICS.securitySuccess).filter(Number.isFinite))
+    };
+  });
+  const scripted = conditions.some((c) => c.metrics.some((m) => m.scripted));
+  const evo = conditions.find((c) => c.condition === "evoorg");
+  const comparisons = [];
+  const byId = new Map(conditions.map((c) => [c.conditionId, c]));
+  const pairs = cfg.comparisons ?? (evo ? conditions.filter((c) => c !== evo).map((c) => ({ a: evo.conditionId, b: c.conditionId })) : []);
+  const metricsFor = cfg.comparisons ? Object.keys(COMPARISON_METRICS) : ["cumulativeReward"];
+  for (const p of pairs) {
+    const A = byId.get(p.a);
+    const B = byId.get(p.b);
+    const n = Math.min(A.metrics.length, B.metrics.length);
+    if (n < 1) continue;
+    for (const metric of metricsFor) {
+      const f = COMPARISON_METRICS[metric];
+      const xs = A.metrics.slice(0, n).map(f);
+      const ys = B.metrics.slice(0, n).map(f);
+      const keep = xs.map((x2, i2) => Number.isFinite(x2) && Number.isFinite(ys[i2]));
+      const a = xs.filter((_, i2) => keep[i2]);
+      const b = ys.filter((_, i2) => keep[i2]);
+      if (!a.length) continue;
+      const r2 = pairedBootstrap(a, b);
+      comparisons.push({ a: p.a, b: p.b, metric, meanDiff: r2.meanDiff, lo: r2.lo, hi: r2.hi, n: a.length });
+    }
+  }
+  return { conditions, comparisons, scripted };
+}
 function experimentSpendUsd(store, experimentId) {
   let usd = 0;
   for (const r2 of store.listRuns({ experimentId })) {
@@ -37678,17 +37741,22 @@ async function runExperiment(opts) {
     const stream = generateStream({ ...cfg.stream, seed: cfg.stream.seed + rep }, FAMILIES);
     for (const cond of cfg.conditions) {
       const base = `${experimentId}-${cond.id}-r${rep + 1}`;
-      let runId = base;
-      for (let attempt = 2; ; attempt++) {
-        const row = store.getRun(runId);
-        const why = row ? unusableReason(store, runId, row.status) : null;
-        if (!why) break;
-        notes.push(`${runId} kept but excluded from aggregates (${why}); re-attempted as ${base}-a${attempt}`);
-        runId = `${base}-a${attempt}`;
-      }
+      const slot = currentAttempt(store, base);
+      const runId = slot.runId;
+      slot.excluded.forEach((x2, i2) => notes.push(`${x2.runId} kept but excluded from aggregates (${x2.reason}); re-attempted as ${slot.excluded[i2 + 1]?.runId ?? runId}`));
       if (store.getRun(runId)) {
         (runsBy[cond.id] ??= []).push(runId);
         continue;
+      }
+      if (opts.stopAt !== void 0) {
+        const now = (opts.now ?? Date.now)();
+        const expected = expectedRunMs(store, experimentId, cond.id);
+        if (now >= opts.stopAt || expected !== null && now + expected >= opts.stopAt) {
+          status = "time-stopped";
+          const why = now >= opts.stopAt ? "the window has closed" : `the longest completed run took ${Math.round(expected / 6e4)} min and would not finish in time`;
+          notes.push(`time window: ${runId} not started (${why}); run the same command again to resume`);
+          break outer;
+        }
       }
       const genome = startGenome(cond);
       const evolution = EvolutionConfig.parse({ ...cond.evolution ?? {}, enabled: cond.condition === "evoorg" || cond.condition === "random-evolution", ...cond.condition === "random-evolution" ? { proposer: "random" } : {} });
@@ -37773,49 +37841,82 @@ async function runExperiment(opts) {
       spentUsd += runner.state.costs.total.usd;
     }
   }
-  const conditions = cfg.conditions.map((c) => {
-    const runs = runsBy[c.id] ?? [];
-    const metrics = runs.map((id2) => runMetrics(store.events(id2)));
-    return {
-      conditionId: c.id,
-      condition: c.condition,
-      runs,
-      metrics,
-      cumulativeReward: ci95(metrics.map((m) => m.cumulativeReward)),
-      successRate: ci95(metrics.map((m) => m.successRate)),
-      lifetimeTokens: ci95(metrics.map((m) => m.lifetime.tokens)),
-      lifetimeUsd: ci95(metrics.map((m) => m.lifetime.usd)),
-      reviewerCoverage: ci95(metrics.map((m) => m.verification.rate)),
-      securitySuccess: ci95(metrics.map(COMPARISON_METRICS.securitySuccess).filter(Number.isFinite))
-    };
-  });
-  const scripted = conditions.some((c) => c.metrics.some((m) => m.scripted));
+  const { conditions, comparisons, scripted } = aggregate(store, cfg, runsBy);
   if (scripted) notes.push("SCRIPTED provider used: these numbers test the pipeline and are NOT research results.");
-  const evo = conditions.find((c) => c.condition === "evoorg");
-  const comparisons = [];
-  const byId = new Map(conditions.map((c) => [c.conditionId, c]));
-  const pairs = cfg.comparisons ?? (evo ? conditions.filter((c) => c !== evo).map((c) => ({ a: evo.conditionId, b: c.conditionId })) : []);
-  const metricsFor = cfg.comparisons ? Object.keys(COMPARISON_METRICS) : ["cumulativeReward"];
-  for (const p of pairs) {
-    const A = byId.get(p.a);
-    const B = byId.get(p.b);
-    const n = Math.min(A.metrics.length, B.metrics.length);
-    if (n < 1) continue;
-    for (const metric of metricsFor) {
-      const f = COMPARISON_METRICS[metric];
-      const xs = A.metrics.slice(0, n).map(f);
-      const ys = B.metrics.slice(0, n).map(f);
-      const keep = xs.map((x2, i2) => Number.isFinite(x2) && Number.isFinite(ys[i2]));
-      const a = xs.filter((_, i2) => keep[i2]);
-      const b = ys.filter((_, i2) => keep[i2]);
-      if (!a.length) continue;
-      const r2 = pairedBootstrap(a, b);
-      comparisons.push({ a: p.a, b: p.b, metric, meanDiff: r2.meanDiff, lo: r2.lo, hi: r2.hi, n: a.length });
-    }
-  }
   const result = { experimentId, configHash, status, scripted, conditions, comparisons, notes };
   store.upsertExperiment({ experimentId, name: cfg.experiment.name, config: cfg, configHash, status, results: { ...result, conditions: conditions.map(({ metrics: _m, ...rest }) => rest) } });
   return result;
+}
+function experimentReadings(store, config2, opts = {}) {
+  const { cfg, configHash, experimentId, slots, runsBy } = readSlots(store, config2, opts.experimentId);
+  const exp = store.getExperiment(experimentId);
+  const agg = aggregate(store, cfg, runsBy);
+  const completed = slots.filter((s) => !s.pending).length;
+  return {
+    experimentId,
+    name: cfg.experiment.name,
+    configHash,
+    model: cfg.controls.model,
+    lockedAt: exp?.lockedAt ?? null,
+    storedStatus: exp?.status ?? null,
+    planned: slots.length,
+    completed,
+    done: completed === slots.length,
+    slots,
+    shadowRuns: store.listRuns({ experimentId }).filter(isShadow).length,
+    allRunIds: store.listRuns({ experimentId }).map((r2) => r2.runId).sort(),
+    scripted: agg.scripted,
+    conditions: agg.conditions.map(({ metrics: _m, ...rest }) => rest),
+    comparisons: agg.comparisons
+  };
+}
+function readingsCsv(store, config2, opts = {}) {
+  const { cfg, experimentId, runsBy } = readSlots(store, config2, opts.experimentId);
+  return resultsCsv({ experimentId, conditions: aggregate(store, cfg, runsBy).conditions });
+}
+function readSlots(store, config2, id2) {
+  const cfg = ExperimentConfig.parse(config2);
+  const configHash = hashObject(cfg);
+  const experimentId = id2 ?? `exp_${configHash.slice(0, 12)}`;
+  const slots = [];
+  const runsBy = {};
+  for (let rep = 0; rep < cfg.repetitions; rep++) {
+    for (const cond of cfg.conditions) {
+      const base = `${experimentId}-${cond.id}-r${rep + 1}`;
+      const cur = currentAttempt(store, base);
+      const row = store.getRun(cur.runId);
+      const m = row ? runMetrics(store.events(cur.runId)) : null;
+      if (row) (runsBy[cond.id] ??= []).push(cur.runId);
+      slots.push({
+        slot: base,
+        conditionId: cond.id,
+        repetition: rep + 1,
+        runId: cur.runId,
+        attempt: cur.attempt,
+        pending: !row,
+        status: row?.status ?? null,
+        excluded: cur.excluded.map((x2) => {
+          const r2 = store.getRun(x2.runId);
+          return { ...x2, tasks: runMetrics(store.events(x2.runId)).tasks, wallSeconds: Math.round(wallMs(r2) / 1e3) };
+        }),
+        startedAt: row?.createdAt ?? null,
+        finishedAt: row ? row.updatedAt : null,
+        wallSeconds: row ? Math.round(wallMs(row) / 1e3) : null,
+        tasks: m?.tasks ?? null,
+        successRate: m?.successRate ?? null,
+        cumulativeReward: m?.cumulativeReward ?? null,
+        tokens: m?.lifetime.tokens ?? null,
+        modelCalls: m?.lifetime.calls ?? null,
+        usd: m?.lifetime.usd ?? null,
+        generation: m?.generation ?? null,
+        mutationsAccepted: m?.mutations.accepted ?? null,
+        mutationsRejected: m?.mutations.rejected ?? null,
+        modelCallFailures: row ? store.events(cur.runId, { types: ["MODEL_CALL_FAILED"] }).length : null,
+        agentFailures: row ? store.events(cur.runId, { types: ["AGENT_FAILED"] }).length : null
+      });
+    }
+  }
+  return { cfg, configHash, experimentId, slots, runsBy };
 }
 function resultsCsv(r2) {
   const head = ["experiment_id", "condition_id", "condition", "run_id", "provider", "scripted", "tasks", "successes", "success_rate", "cumulative_reward", "lifetime_tokens", "lifetime_usd", "validation_tokens", "messages_per_task", "generation", "mutations_accepted", "mutations_rejected", "churn_per100", "first_half_life", "contaminated", "reviewer_coverage", "reviewer_coverage_by_phase", "first_uncovered_task", "security_success_rate", "audit_complete"];
@@ -38058,11 +38159,34 @@ function parseArgs(argv) {
     if (a.startsWith("--")) {
       const [k, v] = a.slice(2).split("=", 2);
       if (v !== void 0) flags[k] = v;
-      else if (argv[i2 + 1] && !argv[i2 + 1].startsWith("--") && ["task", "preset", "model", "provider", "port", "out", "run", "as"].includes(k)) flags[k] = argv[++i2];
+      else if (argv[i2 + 1] && !argv[i2 + 1].startsWith("--") && ["task", "preset", "model", "provider", "port", "out", "run", "as", "stop-at", "csv"].includes(k)) flags[k] = argv[++i2];
       else flags[k] = true;
     } else pos.push(a);
   }
   return { pos, flags };
+}
+function readExperimentConfig(file2) {
+  const raw = readFileSync3(file2, "utf8");
+  return file2.endsWith(".json") ? JSON.parse(raw) : (0, import_yaml.parse)(raw);
+}
+function pidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+function parseStopAt(v) {
+  const hm = /^(\d{1,2}):(\d{2})$/.exec(v);
+  if (hm) {
+    const d = /* @__PURE__ */ new Date();
+    d.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
+    if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? t : fail(`--stop-at: expected HH:MM or an ISO date-time, got "${v}"`);
 }
 var wsDir = () => resolve3(process.env.ORGWORLD_HOME ?? join5(process.cwd(), ".orgworld"));
 var cfgPath = () => join5(wsDir(), "config", "orgworld.json");
@@ -38118,6 +38242,9 @@ var HELP = `orgworld ${ORGWORLD_VERSION} \u2014 persistent self-evolving multi-a
   replay [--run <id>]              print the recorded timeline (no model calls)
   export [--run <id>] [--out f]    write a .orgworld-run.zip (secrets scrubbed)
   experiment <config.yaml>         run a locked experiment; writes results CSV
+      [--stop-at HH:MM|ISO]        start no run that would not finish by then; re-run to resume
+  readings <config.yaml> [--out f.json] [--csv f.csv]
+                                   progress, per-run metrics, interim aggregates (read-only)
   serve                            start the local API + web world
   pause | resume | stop [--run <id>]
   doctor                           check runtime, database, providers, ports, web, plugin
@@ -38297,18 +38424,35 @@ async function main() {
       return store.close();
     }
     case "experiment": {
-      const file2 = pos[0] ?? fail("experiment <config.yaml|json>");
-      const raw = readFileSync3(file2, "utf8");
-      const config2 = file2.endsWith(".json") ? JSON.parse(raw) : (0, import_yaml.parse)(raw);
+      const config2 = readExperimentConfig(pos[0] ?? fail("experiment <config.yaml|json> [--stop-at HH:MM|ISO]"));
+      const stopAt = typeof flags["stop-at"] === "string" ? parseStopAt(flags["stop-at"]) : void 0;
       const store = openStore();
       const model = ModelConfig.parse(config2?.controls?.model ?? {});
       providerFor(model, flags);
-      const res = await runExperiment({ store, config: config2, provider: () => createProvider(model, { allowPaid: flags["allow-paid"] === true }), log: out });
+      const lockKey = `experiment-lock:${experimentIdOf(config2)}`;
+      const held = store.getKv(lockKey);
+      if (held && held.pid !== process.pid && pidAlive(held.pid)) fail(`this experiment is already running (pid ${held.pid}, since ${held.at})`);
+      store.setKv(lockKey, { pid: process.pid, at: (/* @__PURE__ */ new Date()).toISOString() });
+      if (stopAt !== void 0) out(`time window closes ${new Date(stopAt).toString()}`);
+      const res = await runExperiment({ store, config: config2, provider: () => createProvider(model, { allowPaid: flags["allow-paid"] === true }), log: out, ...stopAt !== void 0 ? { stopAt } : {} }).finally(() => store.setKv(lockKey, null));
       const csv = join5(wsDir(), "experiments", `${res.experimentId}.csv`);
       writeFileSync3(csv, resultsCsv(res));
       for (const c of res.conditions) out(`${c.conditionId.padEnd(14)} CR ${c.cumulativeReward.mean.toFixed(2)} \xB1 ${(c.cumulativeReward.hi - c.cumulativeReward.mean || 0).toFixed(2)} \xB7 SR ${c.successRate.mean.toFixed(2)} \xB7 tokens ${Math.round(c.lifetimeTokens.mean).toLocaleString()}`);
       for (const n of res.notes) out(`note: ${n}`);
+      out(`status: ${res.status}`);
       out(`results \u2192 ${csv}`);
+      return store.close();
+    }
+    case "readings": {
+      const config2 = readExperimentConfig(pos[0] ?? fail("readings <config.yaml|json> [--out file.json] [--csv file.csv]"));
+      const store = openStore();
+      const r2 = experimentReadings(store, config2);
+      if (typeof flags.csv === "string") writeFileSync3(flags.csv, readingsCsv(store, config2));
+      const json3 = JSON.stringify(r2, null, 2) + "\n";
+      if (typeof flags.out === "string") {
+        writeFileSync3(flags.out, json3);
+        out(`${r2.name}: ${r2.completed}/${r2.planned} runs complete \u2192 ${flags.out}`);
+      } else process.stdout.write(json3);
       return store.close();
     }
     case "serve":

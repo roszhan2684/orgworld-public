@@ -3,14 +3,14 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
-import { ModelConfig, ORGWORLD_VERSION, OrganizationGenome, type RunConfigInput } from '@orgworld/protocol';
+import { ModelConfig, ORGWORLD_VERSION, OrganizationGenome, type ExperimentConfigInput, type RunConfigInput } from '@orgworld/protocol';
 import { agentKnowledge, newId, presetGenome, PRESETS, reduceEvents } from '@orgworld/core';
 import { EventStore, exportRun } from '@orgworld/store';
 import { createProvider, isPaidProvider, paidAllowed, resolveClaudeBin } from '@orgworld/cognition';
 import { FAMILIES, taskById } from '@orgworld/bench';
 import { buildRunConfig, createRun, OrgRunner } from '@orgworld/runtime';
 import { runMetrics } from '@orgworld/metrics';
-import { resultsCsv, runExperiment } from '@orgworld/experiment';
+import { experimentIdOf, experimentReadings, readingsCsv, resultsCsv, runExperiment } from '@orgworld/experiment';
 import { startServer } from '@orgworld/server';
 
 interface WorkspaceConfig {
@@ -45,11 +45,36 @@ function parseArgs(argv: string[]) {
     if (a.startsWith('--')) {
       const [k, v] = a.slice(2).split('=', 2) as [string, string | undefined];
       if (v !== undefined) flags[k] = v;
-      else if (argv[i + 1] && !argv[i + 1]!.startsWith('--') && ['task', 'preset', 'model', 'provider', 'port', 'out', 'run', 'as'].includes(k)) flags[k] = argv[++i]!;
+      else if (argv[i + 1] && !argv[i + 1]!.startsWith('--') && ['task', 'preset', 'model', 'provider', 'port', 'out', 'run', 'as', 'stop-at', 'csv'].includes(k)) flags[k] = argv[++i]!;
       else flags[k] = true;
     } else pos.push(a);
   }
   return { pos, flags };
+}
+
+function readExperimentConfig(file: string): ExperimentConfigInput {
+  const raw = readFileSync(file, 'utf8');
+  return (file.endsWith('.json') ? JSON.parse(raw) : parseYaml(raw)) as ExperimentConfigInput;
+}
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+/** "HH:MM" = the next time the local clock shows it; anything else must be a parseable date-time. */
+function parseStopAt(v: string): number {
+  const hm = /^(\d{1,2}):(\d{2})$/.exec(v);
+  if (hm) {
+    const d = new Date();
+    d.setHours(Number(hm[1]), Number(hm[2]), 0, 0);
+    if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? t : fail(`--stop-at: expected HH:MM or an ISO date-time, got "${v}"`);
 }
 
 const wsDir = () => resolve(process.env.ORGWORLD_HOME ?? join(process.cwd(), '.orgworld'));
@@ -109,6 +134,9 @@ const HELP = `orgworld ${ORGWORLD_VERSION} — persistent self-evolving multi-ag
   replay [--run <id>]              print the recorded timeline (no model calls)
   export [--run <id>] [--out f]    write a .orgworld-run.zip (secrets scrubbed)
   experiment <config.yaml>         run a locked experiment; writes results CSV
+      [--stop-at HH:MM|ISO]        start no run that would not finish by then; re-run to resume
+  readings <config.yaml> [--out f.json] [--csv f.csv]
+                                   progress, per-run metrics, interim aggregates (read-only)
   serve                            start the local API + web world
   pause | resume | stop [--run <id>]
   doctor                           check runtime, database, providers, ports, web, plugin
@@ -290,18 +318,36 @@ async function main() {
       return store.close();
     }
     case 'experiment': {
-      const file = pos[0] ?? fail('experiment <config.yaml|json>');
-      const raw = readFileSync(file, 'utf8');
-      const config = file.endsWith('.json') ? JSON.parse(raw) : parseYaml(raw);
+      const config = readExperimentConfig(pos[0] ?? fail('experiment <config.yaml|json> [--stop-at HH:MM|ISO]'));
+      const stopAt = typeof flags['stop-at'] === 'string' ? parseStopAt(flags['stop-at']) : undefined;
       const store = openStore();
       const model = ModelConfig.parse(config?.controls?.model ?? {});
       providerFor(model, flags); // spend guard before anything runs
-      const res = await runExperiment({ store, config, provider: () => createProvider(model, { allowPaid: flags['allow-paid'] === true }), log: out });
+      // One process per experiment: two would interleave runs in the same slots.
+      const lockKey = `experiment-lock:${experimentIdOf(config)}`;
+      const held = store.getKv<{ pid: number; at: string } | null>(lockKey);
+      if (held && held.pid !== process.pid && pidAlive(held.pid)) fail(`this experiment is already running (pid ${held.pid}, since ${held.at})`);
+      store.setKv(lockKey, { pid: process.pid, at: new Date().toISOString() });
+      if (stopAt !== undefined) out(`time window closes ${new Date(stopAt).toString()}`);
+      const res = await runExperiment({ store, config, provider: () => createProvider(model, { allowPaid: flags['allow-paid'] === true }), log: out, ...(stopAt !== undefined ? { stopAt } : {}) }).finally(() => store.setKv(lockKey, null));
       const csv = join(wsDir(), 'experiments', `${res.experimentId}.csv`);
       writeFileSync(csv, resultsCsv(res));
       for (const c of res.conditions) out(`${c.conditionId.padEnd(14)} CR ${c.cumulativeReward.mean.toFixed(2)} ± ${(c.cumulativeReward.hi - c.cumulativeReward.mean || 0).toFixed(2)} · SR ${c.successRate.mean.toFixed(2)} · tokens ${Math.round(c.lifetimeTokens.mean).toLocaleString()}`);
       for (const n of res.notes) out(`note: ${n}`);
+      out(`status: ${res.status}`);
       out(`results → ${csv}`);
+      return store.close();
+    }
+    case 'readings': {
+      const config = readExperimentConfig(pos[0] ?? fail('readings <config.yaml|json> [--out file.json] [--csv file.csv]'));
+      const store = openStore();
+      const r = experimentReadings(store, config);
+      if (typeof flags.csv === 'string') writeFileSync(flags.csv, readingsCsv(store, config));
+      const json = JSON.stringify(r, null, 2) + '\n';
+      if (typeof flags.out === 'string') {
+        writeFileSync(flags.out, json);
+        out(`${r.name}: ${r.completed}/${r.planned} runs complete → ${flags.out}`);
+      } else process.stdout.write(json);
       return store.close();
     }
     case 'serve':

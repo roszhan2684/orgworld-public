@@ -1,8 +1,8 @@
-# Capability Status (2026-11-04)
+# Capability Status (2026-11-06)
 
 `IMPLEMENTED` = code + passing automated tests. `VERIFIED` = exercised end-to-end with recorded evidence. `NOT DONE` = absent. Live = real model cognition; scripted = deterministic test provider (mechanics only, never a result).
 
-Test suite: `pnpm typecheck` → 0 errors; `pnpm vitest run --project unit` → 13 files, 130 tests passing (2026-11-04).
+Test suite: `pnpm typecheck` → 0 errors; `pnpm vitest run --project unit` → 14 files, 136 tests passing (2026-11-06).
 
 | Phase | Capability | Status | Evidence |
 |---|---|---|---|
@@ -19,7 +19,8 @@ Test suite: `pnpm typecheck` → 0 errors; `pnpm vitest run --project unit` → 
 | 10 | Sequential (within-task) RL | NOT DONE | conflict C-12; no heuristic in-task policy yet |
 | 11 | Structural evolution: genome, mutations, validation by paired shadow re-execution, rollback, lineage | VERIFIED (scripted) | experiment pipeline test: proposal with evidence → paired re-execution → accepted, gen 1, validation cost attributed |
 | 12 | Evolution UI | PARTIAL | entry list in web app; lineage graph NOT DONE |
-| 13 | Experiment runner: B0–B3, B7, B8, ablations, locking, CSV | VERIFIED (scripted) | identical streams across conditions; scripted results flagged "not research results". Pilot pre-registered (experiments/pilot/); Claude Haiku 5.5 replication and safety pilot pre-registered as drafts (experiments/pilot-claude/, experiments/safety/). Model-service failures are retried with backoff, never scored as tasks, excluded and re-attempted on resume; the $ ceiling survives a resume (C-19, scripted tests). **No real experiment run yet** |
+| 13 | Experiment runner: B0–B3, B7, B8, ablations, locking, CSV | VERIFIED (scripted) | identical streams across conditions; scripted results flagged "not research results". Pilot pre-registered (experiments/pilot/); Claude Haiku 5.5 replication and safety pilot pre-registered as drafts (experiments/pilot-claude/, experiments/safety/). Model-service failures are retried with backoff, never scored as tasks, excluded and re-attempted on resume; the $ ceiling survives a resume (C-19, scripted tests). Time windows: `experiment --stop-at` stops between runs (no run starts that the longest completed run says would not fit); `readings` reports progress, excluded attempts and interim aggregates read-only; one process per experiment. **No real experiment run yet** |
+| — | Nightly lab sessions (lab/): queue, time window, hard stop, GPU check, environment lock, notebook pushed to the `lab-notebook` branch | IMPLEMENTED | lab helper tests (window, environment lock, page rendering). Pipeline exercised 2026-11-06 in a scratch lab against a test-only fake Ollama and a local git remote: complete run, time stop, hard stop (cut run kept, excluded, re-run as `-a2`), resume, skipped window, blocked weight change + accepted deviation, privacy check on run zips. Against the real Ollama on this Mac: blocked, GPU offload 0%. Nightly job not yet run on a real model |
 | — | Safety (II-§63): Ω switchable per condition, reviewer coverage, security success, mutation audit | VERIFIED (scripted) | experiment test: without Ω the idle reviewer is pruned (coverage < 1 from task 5); with Ω the same proposals are rejected ("invalid: Ω: …") and coverage stays 1.0; every accepted change has evidence + validation. Real-model behaviour unknown until the safety pilot runs |
 | 14 | Counterfactual replay, transfer, forgetting probes | NOT DONE | only validation re-execution exists |
 | 15 | Hardening: CI, perf/scale benchmarks, a11y audit, release | PARTIAL | CI workflow written (not yet run on GitHub); scale benchmarks NOT DONE |
@@ -28,4 +29,4 @@ Test suite: `pnpm typecheck` → 0 errors; `pnpm vitest run --project unit` → 
 
 **Cost so far:** two live runs, $0.0073 total (before the no-paid rule). Since then every run is free: paid providers are refused unless `--allow-paid` (re-checked 2026-11-04: both Claude configs exit with the refusal, nothing locked or spent).
 **Claude API path:** priced per call from the model config (Claude Haiku 5.5 prices read 2026-11-04). Request shape verified only against a mocked API; the first real call is the smoke test, and a refused request stops the run without scoring (C-19). Sonnet 5.5 / Opus 5.5 need the structured-outputs change first (C-20, OPEN).
-**Blocker for free real runs:** qwen2.5-coder:7b is downloaded, but the installed Ollama (`/usr/local/bin/ollama`, Intel Homebrew build) runs under Rosetta on CPU only: 2.3 tok/s generation, 3.1 tok/s prompt reading (measured 2026-10-29), ≈8 min per agent turn. A native Apple-silicon Ollama (Metal) is needed; downloading it was blocked by the session's permission policy, so the user must install it (e.g. the Ollama.app from ollama.com).
+**Blocker for free real runs (re-checked 2026-11-06, still true):** qwen2.5-coder:7b is downloaded, but the installed Ollama (`/usr/local/bin/ollama`, Intel Homebrew build) runs under Rosetta on CPU only: 2.3 tok/s generation, 3.1 tok/s prompt reading (measured 2026-10-29), ≈8 min per agent turn. A native Apple-silicon Ollama (Metal) is needed; downloading it was blocked by the session's permission policy, so the user must install it (e.g. the Ollama.app from ollama.com).

@@ -18,3 +18,11 @@ Written 2026-10-29, before data collection (research II-§67). The YAML in this 
 
 ## Addendum (2026-10-29, before any pilot data): feasibility run first
 A first real free run (single agent, impl-rle#0) took 134 s for 7 model calls on the local model, implying ≈30+ h for pilot.yaml. Per research II-§36 ("investigate before spending"), `feasibility.yaml` (20 tasks, 3 conditions, 1 repetition) runs first. It measures runtime, format compliance and failure modes only; its numbers are never used as evidence for or against any hypothesis. pilot.yaml is unchanged.
+
+## Addendum (2026-11-06, before any pilot data): execution in nightly sessions
+The feasibility run and the pilot are executed by `lab/daily.sh` in nightly time windows on the same machine, spread over as many nights as needed. This changes how the runs are scheduled, not what is run: configuration, task streams, seeds, budgets and analysis are unchanged.
+- **Runs are atomic.** No run starts unless the longest completed run of the experiment says it will finish inside the window. A run cut off by the window's hard stop is kept, excluded from aggregates and re-run from its start under a new attempt id, exactly like a model-service failure (C-19). Every session's notebook page reports these exclusions.
+- **Fixed environment.** One frozen code bundle (sha256 recorded) and one set of model weights (Ollama digest recorded) for the whole experiment; a change to either blocks the experiment. A change in Ollama, Node or macOS version is recorded as a deviation in the notebook.
+- **Runtime.** The 2026-10-29 timings came from an Intel Ollama build running on the CPU under Rosetta. The lab requires Ollama on the GPU (Apple silicon build). The model weights are the same; generation speed is not, so the feasibility run measures runtime again.
+- **Interim readings.** Each session publishes progress and interim aggregates on the `lab-notebook` branch. They are labelled interim, they do not change the stopping rule (all planned runs), and the pre-registered analysis is run once, on the complete set.
+- **Order.** `pilot.yaml` joins the queue only after the researcher has reviewed the feasibility results (runtime per task, format compliance, failure modes).

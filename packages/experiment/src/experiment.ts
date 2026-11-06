@@ -1,6 +1,6 @@
 import { ExperimentConfig, EvolutionConfig, FeatureFlags, type ExperimentConfigInput, type OrganizationGenome } from '@orgworld/protocol';
 import { hashObject, presetGenome, validateGenome } from '@orgworld/core';
-import type { EventStore } from '@orgworld/store';
+import type { EventStore, RunRow } from '@orgworld/store';
 import type { CognitionProvider } from '@orgworld/cognition';
 import { FAMILIES, generateStream } from '@orgworld/bench';
 import { buildRunConfig, createRun, InfrastructureError, OrgRunner, type RetryPolicy } from '@orgworld/runtime';
@@ -29,8 +29,11 @@ export type ComparisonMetric = 'cumulativeReward' | 'reviewerCoverage' | 'securi
 export interface ExperimentResult {
   experimentId: string;
   configHash: string;
-  /** infra-stopped: the model service failed; re-running the same command resumes (C-19). */
-  status: 'completed' | 'budget-stopped' | 'infra-stopped';
+  /**
+   * infra-stopped: the model service failed; time-stopped: the time window (`stopAt`) closed at a run boundary.
+   * Either way, re-running the same command resumes (C-19).
+   */
+  status: 'completed' | 'budget-stopped' | 'infra-stopped' | 'time-stopped';
   scripted: boolean;
   conditions: ConditionResult[];
   /**
@@ -51,6 +54,12 @@ export interface RunExperimentOptions {
   /** Model-call retry policy passed to every runner (tests use tiny delays). */
   retry?: Partial<RetryPolicy>;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * End of the time window (epoch ms). Runs are atomic, so the experiment stops between runs: it starts no run at or
+   * after `stopAt`, nor one that the longest completed run of this experiment says would not finish before it.
+   */
+  stopAt?: number;
+  now?: () => number;
 }
 
 const COMPARISON_METRICS: Record<ComparisonMetric, (m: RunMetrics) => number> = {
@@ -68,6 +77,80 @@ function unusableReason(store: EventStore, runId: string, status: string): strin
     return f && f.type === 'RUN_FAILED' && f.payload.infrastructure ? `infrastructure failure: ${f.payload.error.slice(0, 160)}` : null;
   }
   return `interrupted (status ${status})`;
+}
+
+/** The experiment id `runExperiment` uses for a configuration (hash of the parsed config). */
+export function experimentIdOf(config: ExperimentConfigInput): string {
+  return `exp_${hashObject(ExperimentConfig.parse(config)).slice(0, 12)}`;
+}
+
+/** A slot's current attempt: the first stored run usable in aggregates, or the next unused id (C-19). */
+function currentAttempt(store: EventStore, base: string): { runId: string; attempt: number; excluded: Array<{ runId: string; reason: string }> } {
+  const excluded: Array<{ runId: string; reason: string }> = [];
+  let runId = base;
+  for (let attempt = 1; ; attempt++) {
+    const row = store.getRun(runId);
+    const reason = row ? unusableReason(store, runId, row.status) : null;
+    if (!reason) return { runId, attempt, excluded };
+    excluded.push({ runId, reason });
+    runId = `${base}-a${attempt + 1}`;
+  }
+}
+
+const isShadow = (r: RunRow) => r.label?.startsWith('validation shadow') ?? false;
+const wallMs = (r: RunRow) => Date.parse(r.updatedAt) - Date.parse(r.createdAt);
+
+/** Longest wall-clock time of this experiment's completed runs of a condition (any condition if none yet), or null. */
+function expectedRunMs(store: EventStore, experimentId: string, conditionId: string): number | null {
+  const done = store.listRuns({ experimentId }).filter((r) => r.status === 'completed' && !isShadow(r));
+  const longest = (rs: RunRow[]) => (rs.length ? Math.max(...rs.map(wallMs)) : null);
+  return longest(done.filter((r) => r.label?.includes(` · ${conditionId} · `))) ?? longest(done);
+}
+
+type ParsedConfig = ReturnType<typeof ExperimentConfig.parse>;
+
+/** Per-condition CIs and paired comparisons over the given usable runs (repetition order). */
+function aggregate(store: EventStore, cfg: ParsedConfig, runsBy: Record<string, string[]>): { conditions: ConditionResult[]; comparisons: ExperimentResult['comparisons']; scripted: boolean } {
+  const conditions: ConditionResult[] = cfg.conditions.map((c) => {
+    const runs = runsBy[c.id] ?? [];
+    const metrics = runs.map((id) => runMetrics(store.events(id)));
+    return {
+      conditionId: c.id,
+      condition: c.condition,
+      runs,
+      metrics,
+      cumulativeReward: ci95(metrics.map((m) => m.cumulativeReward)),
+      successRate: ci95(metrics.map((m) => m.successRate)),
+      lifetimeTokens: ci95(metrics.map((m) => m.lifetime.tokens)),
+      lifetimeUsd: ci95(metrics.map((m) => m.lifetime.usd)),
+      reviewerCoverage: ci95(metrics.map((m) => m.verification.rate)),
+      securitySuccess: ci95(metrics.map(COMPARISON_METRICS.securitySuccess).filter(Number.isFinite)),
+    };
+  });
+  const scripted = conditions.some((c) => c.metrics.some((m) => m.scripted));
+  const evo = conditions.find((c) => c.condition === 'evoorg');
+  const comparisons: ExperimentResult['comparisons'] = [];
+  const byId = new Map(conditions.map((c) => [c.conditionId, c]));
+  const pairs = cfg.comparisons ?? (evo ? conditions.filter((c) => c !== evo).map((c) => ({ a: evo.conditionId, b: c.conditionId })) : []);
+  const metricsFor: ComparisonMetric[] = cfg.comparisons ? (Object.keys(COMPARISON_METRICS) as ComparisonMetric[]) : ['cumulativeReward'];
+  for (const p of pairs) {
+    const A = byId.get(p.a)!;
+    const B = byId.get(p.b)!;
+    const n = Math.min(A.metrics.length, B.metrics.length); // repetitions run in order, so the first n are paired
+    if (n < 1) continue;
+    for (const metric of metricsFor) {
+      const f = COMPARISON_METRICS[metric];
+      const xs = A.metrics.slice(0, n).map(f);
+      const ys = B.metrics.slice(0, n).map(f);
+      const keep = xs.map((x, i) => Number.isFinite(x) && Number.isFinite(ys[i]!));
+      const a = xs.filter((_, i) => keep[i]);
+      const b = ys.filter((_, i) => keep[i]);
+      if (!a.length) continue;
+      const r = pairedBootstrap(a, b);
+      comparisons.push({ a: p.a, b: p.b, metric, meanDiff: r.meanDiff, lo: r.lo, hi: r.hi, n: a.length });
+    }
+  }
+  return { conditions, comparisons, scripted };
 }
 
 /**
@@ -122,17 +205,22 @@ export async function runExperiment(opts: RunExperimentOptions): Promise<Experim
       // Resumable and append-only: a usable stored run is kept; an infrastructure-failed or interrupted one stays
       // in the store, is excluded from aggregates, and the slot is re-attempted under a new id (C-19).
       const base = `${experimentId}-${cond.id}-r${rep + 1}`;
-      let runId = base;
-      for (let attempt = 2; ; attempt++) {
-        const row = store.getRun(runId);
-        const why = row ? unusableReason(store, runId, row.status) : null;
-        if (!why) break;
-        notes.push(`${runId} kept but excluded from aggregates (${why}); re-attempted as ${base}-a${attempt}`);
-        runId = `${base}-a${attempt}`;
-      }
+      const slot = currentAttempt(store, base);
+      const runId = slot.runId;
+      slot.excluded.forEach((x, i) => notes.push(`${x.runId} kept but excluded from aggregates (${x.reason}); re-attempted as ${slot.excluded[i + 1]?.runId ?? runId}`));
       if (store.getRun(runId)) {
         (runsBy[cond.id] ??= []).push(runId);
         continue; // never re-run or overwritten
+      }
+      if (opts.stopAt !== undefined) {
+        const now = (opts.now ?? Date.now)();
+        const expected = expectedRunMs(store, experimentId, cond.id);
+        if (now >= opts.stopAt || (expected !== null && now + expected >= opts.stopAt)) {
+          status = 'time-stopped';
+          const why = now >= opts.stopAt ? 'the window has closed' : `the longest completed run took ${Math.round(expected! / 60000)} min and would not finish in time`;
+          notes.push(`time window: ${runId} not started (${why}); run the same command again to resume`);
+          break outer;
+        }
       }
       const genome: OrganizationGenome = startGenome(cond);
       const evolution = EvolutionConfig.parse({ ...(cond.evolution ?? {}), enabled: cond.condition === 'evoorg' || cond.condition === 'random-evolution', ...(cond.condition === 'random-evolution' ? { proposer: 'random' } : {}) });
@@ -220,53 +308,145 @@ export async function runExperiment(opts: RunExperimentOptions): Promise<Experim
   }
 
   // Aggregate (metrics include validation shadow costs via MUTATION_VALIDATED attribution).
-  const conditions: ConditionResult[] = cfg.conditions.map((c) => {
-    const runs = runsBy[c.id] ?? [];
-    const metrics = runs.map((id) => runMetrics(store.events(id)));
-    return {
-      conditionId: c.id,
-      condition: c.condition,
-      runs,
-      metrics,
-      cumulativeReward: ci95(metrics.map((m) => m.cumulativeReward)),
-      successRate: ci95(metrics.map((m) => m.successRate)),
-      lifetimeTokens: ci95(metrics.map((m) => m.lifetime.tokens)),
-      lifetimeUsd: ci95(metrics.map((m) => m.lifetime.usd)),
-      reviewerCoverage: ci95(metrics.map((m) => m.verification.rate)),
-      securitySuccess: ci95(metrics.map(COMPARISON_METRICS.securitySuccess).filter(Number.isFinite)),
-    };
-  });
-  const scripted = conditions.some((c) => c.metrics.some((m) => m.scripted));
+  const { conditions, comparisons, scripted } = aggregate(store, cfg, runsBy);
   if (scripted) notes.push('SCRIPTED provider used: these numbers test the pipeline and are NOT research results.');
-  const evo = conditions.find((c) => c.condition === 'evoorg');
-  const comparisons: ExperimentResult['comparisons'] = [];
-  const byId = new Map(conditions.map((c) => [c.conditionId, c]));
-  const pairs = cfg.comparisons ?? (evo ? conditions.filter((c) => c !== evo).map((c) => ({ a: evo.conditionId, b: c.conditionId })) : []);
-  const metricsFor: ComparisonMetric[] = cfg.comparisons ? (Object.keys(COMPARISON_METRICS) as ComparisonMetric[]) : ['cumulativeReward'];
-  for (const p of pairs) {
-    const A = byId.get(p.a)!;
-    const B = byId.get(p.b)!;
-    const n = Math.min(A.metrics.length, B.metrics.length); // repetitions run in order, so the first n are paired
-    if (n < 1) continue;
-    for (const metric of metricsFor) {
-      const f = COMPARISON_METRICS[metric];
-      const xs = A.metrics.slice(0, n).map(f);
-      const ys = B.metrics.slice(0, n).map(f);
-      const keep = xs.map((x, i) => Number.isFinite(x) && Number.isFinite(ys[i]!));
-      const a = xs.filter((_, i) => keep[i]);
-      const b = ys.filter((_, i) => keep[i]);
-      if (!a.length) continue;
-      const r = pairedBootstrap(a, b);
-      comparisons.push({ a: p.a, b: p.b, metric, meanDiff: r.meanDiff, lo: r.lo, hi: r.hi, n: a.length });
-    }
-  }
   const result: ExperimentResult = { experimentId, configHash, status, scripted, conditions, comparisons, notes };
   store.upsertExperiment({ experimentId, name: cfg.experiment.name, config: cfg, configHash, status, results: { ...result, conditions: conditions.map(({ metrics: _m, ...rest }) => rest) } });
   return result;
 }
 
+export interface SlotReading {
+  /** condition × repetition, e.g. exp_…-evoorg-r2 */
+  slot: string;
+  conditionId: string;
+  repetition: number;
+  /** The attempt that counts, or the one that runs next if `pending`. */
+  runId: string;
+  attempt: number;
+  pending: boolean;
+  status: string | null;
+  /** Earlier attempts: kept in the store, excluded from aggregates (C-19). */
+  excluded: Array<{ runId: string; reason: string; tasks: number; wallSeconds: number }>;
+  startedAt: string | null;
+  finishedAt: string | null;
+  wallSeconds: number | null;
+  tasks: number | null;
+  successRate: number | null;
+  cumulativeReward: number | null;
+  tokens: number | null;
+  modelCalls: number | null;
+  usd: number | null;
+  generation: number | null;
+  mutationsAccepted: number | null;
+  mutationsRejected: number | null;
+  /** Failed model calls (retried service errors and unparseable replies) and agent-level failures. */
+  modelCallFailures: number | null;
+  agentFailures: number | null;
+}
+
+export interface ExperimentReadings {
+  experimentId: string;
+  name: string;
+  configHash: string;
+  model: ParsedConfig['controls']['model'];
+  /** null until the first `experiment` invocation locks the configuration. */
+  lockedAt: string | null;
+  storedStatus: string | null;
+  planned: number;
+  completed: number;
+  done: boolean;
+  slots: SlotReading[];
+  shadowRuns: number;
+  /** Every stored run of this experiment: counted, excluded and validation shadows (for export). */
+  allRunIds: string[];
+  scripted: boolean;
+  /** Interim, over the runs completed so far. The pre-registered analysis uses all planned runs. */
+  conditions: Array<Omit<ConditionResult, 'metrics'>>;
+  comparisons: ExperimentResult['comparisons'];
+}
+
+/**
+ * Read-only progress report for an experiment (no lock, no model calls): every condition × repetition slot with its
+ * counted run, excluded attempts and metrics, plus interim aggregates. Readings taken while the experiment is running
+ * show the in-progress run as an excluded "interrupted" attempt.
+ */
+export function experimentReadings(store: EventStore, config: ExperimentConfigInput, opts: { experimentId?: string } = {}): ExperimentReadings {
+  const { cfg, configHash, experimentId, slots, runsBy } = readSlots(store, config, opts.experimentId);
+  const exp = store.getExperiment(experimentId);
+  const agg = aggregate(store, cfg, runsBy);
+  const completed = slots.filter((s) => !s.pending).length;
+  return {
+    experimentId,
+    name: cfg.experiment.name,
+    configHash,
+    model: cfg.controls.model,
+    lockedAt: exp?.lockedAt ?? null,
+    storedStatus: exp?.status ?? null,
+    planned: slots.length,
+    completed,
+    done: completed === slots.length,
+    slots,
+    shadowRuns: store.listRuns({ experimentId }).filter(isShadow).length,
+    allRunIds: store.listRuns({ experimentId }).map((r) => r.runId).sort(),
+    scripted: agg.scripted,
+    conditions: agg.conditions.map(({ metrics: _m, ...rest }) => rest),
+    comparisons: agg.comparisons,
+  };
+}
+
+/** resultsCsv over the runs completed so far (an interrupted invocation never wrote its own CSV). */
+export function readingsCsv(store: EventStore, config: ExperimentConfigInput, opts: { experimentId?: string } = {}): string {
+  const { cfg, experimentId, runsBy } = readSlots(store, config, opts.experimentId);
+  return resultsCsv({ experimentId, conditions: aggregate(store, cfg, runsBy).conditions });
+}
+
+function readSlots(store: EventStore, config: ExperimentConfigInput, id?: string) {
+  const cfg = ExperimentConfig.parse(config);
+  const configHash = hashObject(cfg);
+  const experimentId = id ?? `exp_${configHash.slice(0, 12)}`;
+  const slots: SlotReading[] = [];
+  const runsBy: Record<string, string[]> = {};
+  for (let rep = 0; rep < cfg.repetitions; rep++) {
+    for (const cond of cfg.conditions) {
+      const base = `${experimentId}-${cond.id}-r${rep + 1}`;
+      const cur = currentAttempt(store, base);
+      const row = store.getRun(cur.runId);
+      const m = row ? runMetrics(store.events(cur.runId)) : null;
+      if (row) (runsBy[cond.id] ??= []).push(cur.runId);
+      slots.push({
+        slot: base,
+        conditionId: cond.id,
+        repetition: rep + 1,
+        runId: cur.runId,
+        attempt: cur.attempt,
+        pending: !row,
+        status: row?.status ?? null,
+        excluded: cur.excluded.map((x) => {
+          const r = store.getRun(x.runId)!;
+          return { ...x, tasks: runMetrics(store.events(x.runId)).tasks, wallSeconds: Math.round(wallMs(r) / 1000) };
+        }),
+        startedAt: row?.createdAt ?? null,
+        finishedAt: row ? row.updatedAt : null,
+        wallSeconds: row ? Math.round(wallMs(row) / 1000) : null,
+        tasks: m?.tasks ?? null,
+        successRate: m?.successRate ?? null,
+        cumulativeReward: m?.cumulativeReward ?? null,
+        tokens: m?.lifetime.tokens ?? null,
+        modelCalls: m?.lifetime.calls ?? null,
+        usd: m?.lifetime.usd ?? null,
+        generation: m?.generation ?? null,
+        mutationsAccepted: m?.mutations.accepted ?? null,
+        mutationsRejected: m?.mutations.rejected ?? null,
+        modelCallFailures: row ? store.events(cur.runId, { types: ['MODEL_CALL_FAILED'] }).length : null,
+        agentFailures: row ? store.events(cur.runId, { types: ['AGENT_FAILED'] }).length : null,
+      });
+    }
+  }
+  return { cfg, configHash, experimentId, slots, runsBy };
+}
+
 /** Research data export (build §62): one row per run, flat columns for Python/R/Jupyter. */
-export function resultsCsv(r: ExperimentResult): string {
+export function resultsCsv(r: Pick<ExperimentResult, 'experimentId' | 'conditions'>): string {
   const head = ['experiment_id', 'condition_id', 'condition', 'run_id', 'provider', 'scripted', 'tasks', 'successes', 'success_rate', 'cumulative_reward', 'lifetime_tokens', 'lifetime_usd', 'validation_tokens', 'messages_per_task', 'generation', 'mutations_accepted', 'mutations_rejected', 'churn_per100', 'first_half_life', 'contaminated', 'reviewer_coverage', 'reviewer_coverage_by_phase', 'first_uncovered_task', 'security_success_rate', 'audit_complete'];
   const rows = r.conditions.flatMap((c) =>
     c.metrics.map((m, i) => [
