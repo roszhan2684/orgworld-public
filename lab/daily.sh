@@ -51,7 +51,14 @@ cleanup() {
   rm -rf "$LOCK"
 }
 trap cleanup EXIT
-trap 'exit 130' INT TERM
+# A stop signal (a user, launchd, or another program) while an experiment runs: record it, stop the experiment, and
+# still publish what was recorded. At any other time: exit.
+on_signal() {
+  say "received a stop signal"
+  touch "$S/signalled"
+  if [[ -n "$EXP_PID" ]]; then kill -TERM "$EXP_PID" 2>/dev/null; else exit 130; fi
+}
+trap on_signal INT TERM
 
 nb_open() {
   if [[ -d "$NB/.git" ]]; then
@@ -130,7 +137,7 @@ publish() {
     [[ -f "$S/results.csv" ]] && cp "$S/results.csv" "data/$name/results.csv"
   fi
   file="$(lab render "$S" "$NB")" || { say "render failed"; return; }
-  git add -A
+  git -c advice.updateSparsePath=false add -A
   # New run exports sit outside the sparse checkout (only they exist locally), so they are added explicitly.
   [[ -n "$name" && -d "data/$name/runs" ]] && git add --sparse -- "data/$name/runs"
   if ! git diff --cached --name-only -z --diff-filter=ACMR | xargs -0 "$LAB/bin/privacy-check.sh"; then
@@ -176,6 +183,7 @@ lab set "$SJ" date "$(date +%Y-%m-%d)"
 lab set "$SJ" startedAt "$(now_utc)"
 lab set "$SJ" window "${START_TIME}–$STOP_AT, hard stop $HARD_STOP_AT"
 lab set "$SJ" repoUrl "$REPO_URL"
+[[ -n "${SESSION_NOTE:-}" ]] && lab push "$SJ" notes "$SESSION_NOTE"
 cp "$CUR/FROZEN.json" "$S/frozen.json"
 
 # 1. Time window and power.
@@ -243,21 +251,30 @@ lab provenance "$PROV" "$S/env.json" "$(lab get "$SJ" date)" >"$S/prov.json"
 
 # 5. Run until the window closes. Runs are atomic: the CLI starts no run that would not finish by STOP_AT, and the
 #    watchdog stops anything still running at HARD_STOP_AT (that run is kept, excluded, and re-run next session).
-say "running $CFG; no new run after $STOP_AT; hard stop $HARD_STOP_AT (in ${SECS_TO_HARD}s)"
 OLOG="$HOME/.ollama/logs/server.log"
 OLOG_START="$(stat -f %z "$OLOG" 2>/dev/null || echo 0)"
-# Started directly (not through a shell function) so that $! is the experiment process itself.
-export ORGWORLD_HOME; ORGWORLD_HOME="$(wsdir "$CFG")"
-"$NODE" "$CUR/orgworld.mjs" experiment "$CUR/$CFG" --stop-at "$STOP_AT" >"$S/experiment.out" 2>&1 &
-EXP_PID=$!
-caffeinate -i -s -w "$EXP_PID" &
-(sleep "$SECS_TO_HARD"; touch "$S/hard-stop"; kill -TERM "$EXP_PID"; sleep 60; kill -KILL "$EXP_PID") 2>/dev/null &
-WD_PID=$!
-wait "$EXP_PID"
-RC=$?
-EXP_PID=""
-pkill -P "$WD_PID" 2>/dev/null; kill "$WD_PID" 2>/dev/null; WD_PID=""
-cat "$S/experiment.out"
+RC=0
+if [[ "${PUBLISH_ONLY:-0}" == 1 ]]; then
+  # Publish what is already recorded (e.g. after a session that was stopped before it could publish); no new runs.
+  say "publish only: no new runs"
+  : >"$S/experiment.out"
+else
+  say "running $CFG; no new run after $STOP_AT; hard stop $HARD_STOP_AT (in ${SECS_TO_HARD}s)"
+  # Started directly (not through a shell function) so that $! is the experiment process itself.
+  export ORGWORLD_HOME; ORGWORLD_HOME="$(wsdir "$CFG")"
+  "$NODE" "$CUR/orgworld.mjs" experiment "$CUR/$CFG" --stop-at "$STOP_AT" >"$S/experiment.out" 2>&1 &
+  EXP_PID=$!
+  caffeinate -i -s -w "$EXP_PID" &
+  (sleep "$SECS_TO_HARD"; touch "$S/hard-stop"; kill -TERM "$EXP_PID"; sleep 60; kill -KILL "$EXP_PID") 2>/dev/null &
+  WD_PID=$!
+  wait "$EXP_PID"
+  RC=$?
+  # A trapped signal interrupts wait; keep waiting until the experiment has really exited.
+  while kill -0 "$EXP_PID" 2>/dev/null; do wait "$EXP_PID"; RC=$?; done
+  EXP_PID=""
+  pkill -P "$WD_PID" 2>/dev/null; kill "$WD_PID" 2>/dev/null; WD_PID=""
+  cat "$S/experiment.out"
+fi
 
 # 6. Readings.
 HARD=false; [[ -f "$S/hard-stop" ]] && HARD=true
@@ -269,14 +286,17 @@ lab set "$SJ" retries "$(grep -c 'model call failed (attempt' "$S/experiment.out
 TRUNC="$(tail -c +"$((OLOG_START + 1))" "$OLOG" 2>/dev/null | grep -c 'truncated = 1')"
 lab set "$SJ" truncatedPrompts "${TRUNC:-0}" json
 while IFS= read -r n; do lab push "$SJ" notes "$n"; done < <(sed -n 's/^note: //p' "$S/experiment.out")
-case "$HARD:$STATUS" in
+SIG=false; [[ -f "$S/signalled" ]] && SIG=true
+case "$HARD:$SIG:$STATUS" in
   true:*) STOP="hard stop at $HARD_STOP_AT" ;;
-  *:completed) STOP="experiment complete" ;;
-  *:time-stopped) STOP="time window closing at $STOP_AT" ;;
-  *:infra-stopped) STOP="model service kept failing after retries" ;;
-  *:budget-stopped) STOP="experiment budget ceiling" ;;
+  *:true:*) STOP="stopped by an outside signal at $(date -r "$S/signalled" +%H:%M) (the run in progress is kept, excluded and re-run next session)" ;;
+  *:*:completed) STOP="experiment complete" ;;
+  *:*:time-stopped) STOP="time window closing at $STOP_AT" ;;
+  *:*:infra-stopped) STOP="model service kept failing after retries" ;;
+  *:*:budget-stopped) STOP="experiment budget ceiling" ;;
   *) STOP="the experiment process exited with code $RC (see the local log)" ;;
 esac
+[[ "${PUBLISH_ONLY:-0}" == 1 ]] && STOP="publish only: results recorded so far, no new runs"
 lab set "$SJ" stopReason "$STOP"
 owx "$CFG" readings "$CUR/$CFG" --out "$S/after.json" --csv "$S/results.csv" >/dev/null || say "readings failed"
 
