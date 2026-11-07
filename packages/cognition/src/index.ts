@@ -38,7 +38,7 @@ export function createProvider(model: ModelConfig, opts: { allowPaid?: boolean; 
       // Prices come from the run's model config (or the caller); with none, the provider refuses to run (fatal).
       return new AnthropicApiProvider({ apiKey: process.env.ANTHROPIC_API_KEY ?? '', pricing: opts.pricing ?? model.pricing ?? {} });
     case 'ollama':
-      return new OllamaProvider(model.seed !== undefined ? { seed: model.seed } : {});
+      return new OllamaProvider({ ...(model.seed !== undefined ? { seed: model.seed } : {}), ...(model.contextTokens !== undefined ? { contextTokens: model.contextTokens } : {}) });
     case 'scripted':
       throw new CognitionError('the scripted provider is test-only and cannot be created from configuration', false);
   }

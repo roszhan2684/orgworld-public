@@ -14,8 +14,12 @@ import { resultsCsv, runExperiment } from '../src/index.ts';
  * Scripted world rule: implementation tasks are always solved; security tasks are solved only when the entry agent
  * can consult an agent whose role is "Security Reviewer". So evolution has something real (in this toy world) to find.
  */
+/** What the scripted organization proposes when asked to redesign itself (idea 26 tests). */
+let llmProposal: Record<string, unknown> = { type: 'NONE', hypothesis: 'n/a' };
+
 function scriptedWorld() {
   return new ScriptedProvider((req: CognitionRequest) => {
+    if (req.purpose === 'llm proposer') return llmProposal;
     if (req.purpose.startsWith('design')) return { agents: [{ id: 'p', roleId: 'planner' }, { id: 's', roleId: 'security_reviewer' }], edges: [{ from: 'p', to: 's', kind: 'delegate' }, { from: 's', to: 'p', kind: 'inform' }], entry: 'p' };
     if (req.purpose.startsWith('vote') || req.purpose.startsWith('meeting')) return { option: 'x', rationale: 'n/a', kind: 'STATUS_UPDATE', content: 'n/a' };
     const taskId = /TASK (\S+) —/.exec(req.prompt)?.[1];
@@ -113,4 +117,57 @@ describe('Stage-1 policy evaluation (build Phase 9)', () => {
     expect(new OrgPolicy('thompson', ['a'], 1).select('x').label).toBe('bandit policy');
     expect(new OrgPolicy('heuristic', ['a', 'b'], 1, { sec: 'b' }).select('sec').chosen).toBe('b');
   });
+});
+
+describe('organization checks in evolution (ideas 24–26, C-21)', () => {
+  const config = (evolution: Record<string, unknown>) => ({
+    experiment: { name: `org-checks-${Math.random().toString(36).slice(2, 7)}` },
+    stream: { kind: 'stationary' as const, tasks: 10, seed: 3, phases: [{ id: 'A', mix: { implementation: 0.5, security: 0.5 } }], excludeFamilies: ['impl-expr-eval', 'impl-interval-merge', 'impl-lru-cache'] },
+    conditions: [{ id: 'evoorg', condition: 'evoorg' as const, preset: 'generalists-4', evolution: { trigger: { kind: 'periodic' as const, everyK: 5 }, minTasksBeforeFirst: 5, bufferRecent: 3, bufferHistorical: 1, delta: 0.05, ...evolution } }],
+    repetitions: 1,
+    controls: { model: { provider: 'scripted' as const, model: 'scripted-world' } },
+  });
+  const shadowCalls = (store: EventStore, runId: string) => store.listRuns().filter((r) => r.label === `validation shadow of ${runId}`).reduce((a, r) => a + store.runState(r.runId).costs.total.calls, 0);
+
+  it('counterfactual screen on failed tasks, contribution check, shared re-runs, every shadow call charged once', async () => {
+    const store = EventStore.open(join(mkdtempSync(join(tmpdir(), 'owexp-')), 'orgworld.db'));
+    const res = await runExperiment({ store, provider: scriptedWorld, config: config({ counterfactualReview: true, contributionCheck: true }) });
+    const runId = res.conditions[0]!.runs[0]!;
+    const s = store.runState(runId);
+    // 25: the first trigger measures a2 (others rotate later); a2 is idle, so the idle rule handles it, not a new proposal.
+    expect(s.learning!.contributions[0]).toMatchObject({ agentId: 'a2' });
+    // 24: the specialist proposal is first replayed on the failed security tasks only, against what actually happened.
+    const cf = s.learning!.counterfactuals[0]!;
+    expect(cf.taskIds.every((t) => t.startsWith('sec-'))).toBe(true);
+    expect(cf).toMatchObject({ better: true, incumbentScore: expect.any(Number) });
+    expect(cf.alternativeScore).toBeGreaterThan(cf.incumbentScore);
+    expect(Object.values(s.evolution.proposals).some((p) => p.status === 'accepted')).toBe(true);
+    // Cost: the incumbent replay is shared by the contribution check and validation, and each shadow call counts once.
+    expect(s.costs.byCategory.validation.calls).toBe(shadowCalls(store, runId));
+    // Two triggers (after tasks 5 and 10): a2, then a3 in rotation; both idle, so the idle-agent rule covers them.
+    expect(s.learning!.contributions.map((x) => x.agentId)).toEqual(['a2', 'a3']);
+    expect(res.conditions[0]!.metrics[0]!.learning).toMatchObject({ contributionChecks: 2, counterfactuals: 1 });
+    expect(resultsCsv(res).split('\n')[0]).toContain('contribution_checks,counterfactuals');
+    store.close();
+  }, 120_000);
+
+  it('the organization proposes its own change (labelled "llm"); it is validated like any other; unusable proposals are recorded', async () => {
+    const store = EventStore.open(join(mkdtempSync(join(tmpdir(), 'owexp-')), 'orgworld.db'));
+    llmProposal = { type: 'ADD_AGENT', roleId: 'security_reviewer', hypothesis: 'Security tasks fail without a specialist; a security reviewer will fix them.' };
+    const res = await runExperiment({ store, provider: scriptedWorld, config: config({ proposer: 'llm' }) });
+    const s = store.runState(res.conditions[0]!.runs[0]!);
+    const props = Object.values(s.evolution.proposals);
+    expect(props[0]!.proposal).toMatchObject({ proposer: 'llm', mutation: { type: 'ADD_AGENT', agent: { roleId: 'security_reviewer' } } });
+    expect(props[0]!.status).toBe('accepted');
+    expect(props[0]!.validation!.method).toBe('paired-reexecution');
+    expect(s.costs.byCategory.controller.calls).toBeGreaterThanOrEqual(1);
+
+    llmProposal = { type: 'CHANGE_ROLE', agentId: 'a2', roleId: 'no_such_role', hypothesis: 'x' };
+    const bad = await runExperiment({ store, provider: scriptedWorld, config: config({ proposer: 'llm' }) });
+    const b = store.runState(bad.conditions[0]!.runs[0]!);
+    expect(Object.keys(b.evolution.proposals)).toHaveLength(0);
+    expect(b.anomalies[0]).toMatchObject({ kind: 'llm-proposal-unusable' });
+    llmProposal = { type: 'NONE', hypothesis: 'n/a' };
+    store.close();
+  }, 120_000);
 });

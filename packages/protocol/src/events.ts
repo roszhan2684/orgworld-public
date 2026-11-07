@@ -84,6 +84,8 @@ export const Provenance = z
 const id = z.string().min(1);
 const nid = z.string().nullable();
 const rec = z.record(z.string(), z.unknown());
+/** Cost of shadow re-execution, attributed to the parent run (III Control 4). */
+const ShadowCost = z.object({ tokens: z.number(), calls: z.number(), usd: z.number() }).strict();
 
 /* ---------------- payloads ---------------- */
 
@@ -232,7 +234,21 @@ export const EventPayloads = {
     })
     .strict(),
   VOTE_CAST: z
-    .object({ decisionId: id, agentId: id, option: z.string(), rationale: z.string().max(1000), weight: z.number() })
+    .object({
+      decisionId: id,
+      agentId: id,
+      option: z.string(),
+      rationale: z.string().max(1000),
+      weight: z.number(),
+      // C-21 extensions (absent unless the feature is on)
+      round: z.number().int().positive().optional(),
+      previousOption: z.string().optional(),
+      blind: z.boolean().optional(),
+      /** Predicted probability that the task succeeds if this option is chosen. */
+      confidence: z.number().min(0).max(1).optional(),
+      evidence: z.array(z.string()).optional(),
+      evidenceWeight: z.number().optional(),
+    })
     .strict(),
   DECISION_COMPLETED: z
     .object({
@@ -243,6 +259,10 @@ export const EventPayloads = {
       tally: z.record(z.string(), z.number()),
       rationale: z.string(),
       opposition: z.array(z.string()),
+      rounds: z.number().int().positive().optional(),
+      predictedSuccess: z.number().min(0).max(1).optional(),
+      minorityReport: z.string().max(2000).optional(),
+      tieBreakBy: z.string().optional(),
     })
     .strict(),
 
@@ -255,6 +275,8 @@ export const EventPayloads = {
       teamId: z.string().optional(),
       content: z.string().max(4000),
       provenance: Provenance,
+      /** e.g. lesson, playbook, decision, category:security */
+      tags: z.array(z.string().max(64)).max(8).optional(),
     })
     .strict(),
   MEMORY_RETRIEVED: z
@@ -416,6 +438,47 @@ export const EventPayloads = {
     .object({ probeId: id, purpose: z.string(), genomeId: id, taskId: id, score: z.number() })
     .strict(),
   ANOMALY_DETECTED: z.object({ kind: z.string(), detail: z.string() }).strict(),
+
+  // Organization-behaviour extensions (conflict C-21): learning, deliberation, prediction, organization checks.
+  REFLECTION_RECORDED: z
+    .object({ taskId: id, agentId: id, success: z.boolean(), category: z.string().nullable(), whys: z.array(z.string().max(400)).max(3), lesson: z.string().max(600), memoryId: nid })
+    .strict(),
+  LESSON_EVALUATED: z
+    .object({ memoryId: id, taskId: id, success: z.boolean(), uses: z.number().int(), wins: z.number().int(), utility: z.number(), baseline: z.number(), retired: z.boolean() })
+    .strict(),
+  DECISION_REVIEWED: z
+    .object({ decisionId: id, taskId: id, chosen: z.string(), predictedSuccess: z.number().min(0).max(1).nullable(), taskSuccess: z.boolean(), memoryId: nid })
+    .strict(),
+  ARGUMENT_MADE: z
+    .object({
+      argumentId: id,
+      decisionId: id,
+      agentId: id,
+      round: z.number().int().positive(),
+      stance: z.enum(['against', 'rebuttal', 'premortem']),
+      option: z.string(),
+      content: z.string().max(1500),
+      evidence: z.array(z.string()),
+      evidenceValid: z.boolean(),
+    })
+    .strict(),
+  PLANS_PROPOSED: z
+    .object({
+      taskId: id,
+      agentId: id,
+      plans: z.array(z.object({ planId: z.string(), summary: z.string().max(400), predictedSuccess: z.number().min(0).max(1) }).strict()).min(1).max(3),
+      chosenPlanId: z.string(),
+    })
+    .strict(),
+  PREDICTION_SCORED: z
+    .object({ taskId: id, agentId: id, source: z.enum(['plan', 'vote']), refId: z.string(), predicted: z.number().min(0).max(1), actual: z.union([z.literal(0), z.literal(1)]), brier: z.number().min(0).max(1) })
+    .strict(),
+  COUNTERFACTUAL_EVALUATED: z
+    .object({ proposalId: id, taskIds: z.array(z.string()), incumbentScore: z.number(), alternativeScore: z.number(), better: z.boolean(), shadowRunIds: z.array(z.string()), cost: ShadowCost })
+    .strict(),
+  CONTRIBUTION_MEASURED: z
+    .object({ agentId: id, taskIds: z.array(z.string()), withScore: z.number(), withoutScore: z.number(), delta: z.number(), shadowRunIds: z.array(z.string()), cost: ShadowCost })
+    .strict(),
   CONTAMINATION_RECORDED: z.object({ source: z.string(), action: z.string(), detail: z.string() }).strict(),
 } as const;
 

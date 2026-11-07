@@ -31,7 +31,19 @@ export class MemoryIndex {
     return memoryRead === 'org';
   }
 
-  retrieve(query: string, agentId: string, teamId: string | null, memoryRead: 'none' | 'private' | 'team' | 'org', k = 3): { items: MemoryItem[]; denied: string[] } {
+  /**
+   * `opts` (C-21): `filter` limits candidates (e.g. by tag), `boost` multiplies the lexical score (e.g. lesson utility),
+   * `recentFallback` returns the newest readable candidates when none matches the query lexically.
+   */
+  retrieve(
+    query: string,
+    agentId: string,
+    teamId: string | null,
+    memoryRead: 'none' | 'private' | 'team' | 'org',
+    k = 3,
+    opts: { filter?: (it: MemoryItem) => boolean; boost?: (it: MemoryItem) => number; recentFallback?: boolean } = {},
+  ): { items: MemoryItem[]; denied: string[] } {
+    if (opts.filter || opts.boost || opts.recentFallback) return this.retrieveWith(query, agentId, teamId, memoryRead, k, opts);
     const q = tokens(query);
     if (q.length === 0) return { items: [], denied: [] };
     const N = this.items.length;
@@ -55,6 +67,28 @@ export class MemoryIndex {
       if (!this.canRead(it, agentId, teamId, memoryRead)) denied.push(it.memoryId);
       else if (items.length < k) items.push(it);
     }
+    return { items, denied };
+  }
+
+  private retrieveWith(query: string, agentId: string, teamId: string | null, memoryRead: 'none' | 'private' | 'team' | 'org', k: number, opts: { filter?: (it: MemoryItem) => boolean; boost?: (it: MemoryItem) => number; recentFallback?: boolean }): { items: MemoryItem[]; denied: string[] } {
+    const pool = this.items.filter((it) => !opts.filter || opts.filter(it));
+    const q = new Set(tokens(query));
+    const denied: string[] = [];
+    const readable = pool.filter((it) => {
+      const ok = this.canRead(it, agentId, teamId, memoryRead);
+      if (!ok) denied.push(it.memoryId);
+      return ok;
+    });
+    const scored = readable
+      .map((it) => {
+        const t = tokens(it.content);
+        const overlap = t.length ? t.filter((x) => q.has(x)).length / Math.sqrt(t.length) : 0;
+        return { it, score: overlap * (opts.boost ? opts.boost(it) : 1) };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score || b.it.seq - a.it.seq);
+    let items = scored.slice(0, k).map((x) => x.it);
+    if (!items.length && opts.recentFallback) items = [...readable].sort((a, b) => (opts.boost ? opts.boost(b) - opts.boost(a) : 0) || b.seq - a.seq).slice(0, k);
     return { items, denied };
   }
 }

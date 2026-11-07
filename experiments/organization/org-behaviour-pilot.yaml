@@ -1,0 +1,59 @@
+# DRAFT pre-registration (2026-11-06): not run, not locked, NOT in the lab queue. See PROTOCOL.md in this folder.
+# Tests the organization-behaviour extensions (conflict C-21) on the 12-agent organization at a matched per-task
+# budget. Free local cognition only.
+experiment:
+  name: org-behaviour-pilot
+  description: Do learning from mistakes, structured debate and scored prediction make a persistent 12-agent organization better under an abrupt shift, at the same per-task budget?
+  hypotheses: [OB-H1, OB-H2, OB-H3, OB-H4, OB-H5]
+stream:
+  kind: abrupt
+  tasks: 60
+  seed: 202
+  phases:
+    - id: A
+      mix: { implementation: 0.6, debugging: 0.3, testing: 0.1 }
+    - id: B
+      mix: { security: 0.5, implementation: 0.2, debugging: 0.2, refactoring: 0.1 }
+conditions:
+  - id: evo-base
+    condition: evoorg
+    preset: software-org-12
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 3, bufferHistorical: 1, delta: 0.05 }
+  - id: evo-learn
+    condition: evoorg
+    preset: software-org-12
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 3, bufferHistorical: 1, delta: 0.05 }
+    features: { afterActionReview: true, playbook: true, lessonScoring: true, decisionJournal: true }
+  - id: evo-debate
+    condition: evoorg
+    preset: software-org-12
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 3, bufferHistorical: 1, delta: 0.05 }
+    features: { debate: true, evidenceRule: true, blindVote: true, tieBreak: true, preMortem: true }
+  - id: evo-predict
+    condition: evoorg
+    preset: software-org-12
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 3, bufferHistorical: 1, delta: 0.05 }
+    features: { multiPath: true, trackRecord: true, expertiseDirectory: true }
+  - id: evo-all
+    condition: evoorg
+    preset: software-org-12
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 3, bufferHistorical: 1, delta: 0.05, counterfactualReview: true, contributionCheck: true }
+    features: { afterActionReview: true, playbook: true, lessonScoring: true, decisionJournal: true, debate: true, evidenceRule: true, blindVote: true, tieBreak: true, preMortem: true, multiPath: true, trackRecord: true, expertiseDirectory: true }
+  - id: evo-all-self
+    condition: evoorg
+    preset: software-org-12
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 3, bufferHistorical: 1, delta: 0.05, counterfactualReview: true, contributionCheck: true, proposer: both }
+    features: { afterActionReview: true, playbook: true, lessonScoring: true, decisionJournal: true, debate: true, evidenceRule: true, blindVote: true, tieBreak: true, preMortem: true, multiPath: true, trackRecord: true, expertiseDirectory: true }
+repetitions: 2
+controls:
+  # contextTokens pins Ollama's context window so prompts are not silently cut and a server update cannot change it.
+  model: { provider: ollama, model: "qwen2.5-coder:7b", seed: 7, temperature: 0, contextTokens: 16384 }
+  # The same, larger per-task budget for every condition: the extensions must pay for their calls out of it.
+  budget: { perTask: { maxTokens: 120000, maxCalls: 40, maxUsd: 0.25, reserveTokens: 4000 } }
+  maxTotalUsd: 1
+comparisons:
+  - { a: evo-all, b: evo-base }
+  - { a: evo-learn, b: evo-base }
+  - { a: evo-debate, b: evo-base }
+  - { a: evo-predict, b: evo-base }
+  - { a: evo-all-self, b: evo-all }

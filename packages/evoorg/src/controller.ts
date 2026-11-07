@@ -1,5 +1,5 @@
-import type { EvolutionConfig, Mutation, MutationProposal, OrganizationGenome, RoleDescriptor } from '@orgworld/protocol';
-import { applyMutation, capabilitiesOf, isMutationAllowed, MutationError, newId, reachableFrom, Rng, ROLE_LIBRARY, roleVocabulary, validateGenome } from '@orgworld/core';
+import { Mutation, type EvolutionConfig, type MutationProposal, type OrganizationGenome, type RoleDescriptor } from '@orgworld/protocol';
+import { applyMutation, capabilitiesOf, isMutationAllowed, MutationError, newId, reachableFrom, Rng, ROLE_LIBRARY, roleVocabulary, truncate, validateGenome } from '@orgworld/core';
 import type { CognitionProvider } from '@orgworld/cognition';
 import { buildRunConfig, createRun, OrgRunner, type TaskOutcome, type TaskSpec } from '@orgworld/runtime';
 
@@ -150,9 +150,6 @@ export class EvolutionController {
   private vocab: RoleDescriptor[] | null = null;
   constructor(private readonly o: ControllerOptions) {
     this.rng = new Rng(o.seed);
-    // The schema reserves an LLM proposer but none is implemented; refuse instead of silently running the heuristic.
-    if (o.config.enabled && (o.config.proposer === 'llm' || o.config.proposer === 'both'))
-      throw new Error(`evolution proposer "${o.config.proposer}" is not implemented in v0.1 (conflict C-20); use "heuristic" or "random"`);
   }
 
   private get enabled(): boolean {
@@ -174,7 +171,34 @@ export class EvolutionController {
     const d = diagnose(r, history.slice(-windowSize));
     r.emit1({ type: 'DIAGNOSIS_RECORDED', actorId: 'controller', payload: { diagnosis: d as unknown as Record<string, unknown> } });
     const random = c.proposer === 'random';
-    const proposals = (random ? [randomProposal(r.genome, this.rng, this.vocab)] : heuristicProposals(r.genome, d)).slice(0, c.maxProposalsPerTrigger);
+    // C-21 organization checks share one replay buffer per trigger and reuse identical re-executions; with both off,
+    // every proposal draws its own buffer and re-runs the incumbent exactly as before.
+    const shared = !!(c.contributionCheck || c.counterfactualReview);
+    const sharedBuffer = shared ? this.buffer(history) : null;
+    const cache = new Map<string, Evaluation>();
+    const run = async (genome: OrganizationGenome, tasks: HistoryItem[], tag: string): Promise<Evaluation> => {
+      if (!shared) return this.evaluate(genome, tasks, tag);
+      const key = `${structure(genome)}|${tasks.map(taskIdOf).join(',')}`;
+      const hit = cache.get(key);
+      if (hit) return hit;
+      const e = await this.evaluate(genome, tasks, tag);
+      cache.set(key, e);
+      return e;
+    };
+    const charged = new Set<string>();
+    const bill = (...evals: Evaluation[]) => {
+      const fresh = evals.filter((e) => e.runIds.some((id) => !charged.has(id)));
+      for (const e of fresh) for (const id of e.runIds) charged.add(id);
+      return { runIds: fresh.flatMap((e) => e.runIds), cost: { tokens: sum(fresh, 'tokens'), calls: sum(fresh, 'calls'), usd: sum(fresh, 'usd') } };
+    };
+    const first: MutationProposal[] = [];
+    if (c.contributionCheck) {
+      const p = await this.contribution(d, sharedBuffer!, run, bill);
+      if (p) first.push(p);
+    }
+    const base = random ? [randomProposal(r.genome, this.rng, this.vocab)] : c.proposer === 'llm' ? await this.llmProposals(d) : c.proposer === 'both' ? [...heuristicProposals(r.genome, d), ...(await this.llmProposals(d))] : heuristicProposals(r.genome, d);
+    const seen = new Set<string>();
+    const proposals = [...first, ...base].filter((p) => !seen.has(JSON.stringify(p.mutation)) && !!seen.add(JSON.stringify(p.mutation))).slice(0, c.maxProposalsPerTrigger);
     for (const p of proposals) {
       r.emit1({ type: 'MUTATION_PROPOSED', actorId: 'controller', payload: { proposal: p } });
       const blocked = isMutationAllowed(p.mutation, c.mutationSet, ablations);
@@ -194,9 +218,26 @@ export class EvolutionController {
       if (skipValidation) {
         r.emit1({ type: 'MUTATION_VALIDATED', actorId: 'controller', payload: { proposalId: p.id, method: 'skipped-ablation', incumbentScore: null, candidateScore: null, margin: c.delta, bufferTaskIds: [], accepted: true, shadowRunIds: [], cost: { tokens: 0, calls: 0, usd: 0 } } });
       } else {
-        const buffer = this.buffer(history);
-        const inc = await this.evaluate(r.genome, buffer, 'inc');
-        const cand = await this.evaluate(candidate, buffer, 'cand');
+        if (c.counterfactualReview) {
+          // Would the alternative organization have done better on the tasks we just failed? The incumbent's side is
+          // what actually happened (no re-run); the candidate replays those tasks in a shadow run.
+          const failed = history.slice(-c.trigger.everyK).filter((h) => h.spec.kind === 'bench' && !h.outcome.success).slice(-3);
+          if (failed.length) {
+            const observed = fitnessOf(failed.map((h) => h.outcome), this.o.config.fitnessCostPer1kTokens);
+            const alt = await run(candidate, failed, 'cf');
+            const billed = bill(alt);
+            const better = alt.fitness > observed;
+            r.emit1({ type: 'COUNTERFACTUAL_EVALUATED', actorId: 'controller', payload: { proposalId: p.id, taskIds: failed.map(taskIdOf), incumbentScore: observed, alternativeScore: alt.fitness, better, shadowRunIds: billed.runIds, cost: billed.cost } });
+            if (!better) {
+              r.emit1({ type: 'MUTATION_REJECTED', actorId: 'controller', payload: { proposalId: p.id, reason: `counterfactual: no better on the ${failed.length} recently failed task(s) (${alt.fitness.toFixed(3)} vs ${observed.toFixed(3)} observed)` } });
+              continue;
+            }
+          }
+        }
+        const buffer = sharedBuffer ?? this.buffer(history);
+        const inc = await run(r.genome, buffer, 'inc');
+        const cand = await run(candidate, buffer, 'cand');
+        const billed = bill(inc, cand);
         accepted = cand.fitness > inc.fitness + c.delta;
         r.emit1({
           type: 'MUTATION_VALIDATED',
@@ -209,8 +250,8 @@ export class EvolutionController {
             margin: c.delta,
             bufferTaskIds: buffer.map((b) => (b.spec.kind === 'bench' ? b.spec.task.id : b.outcome.taskId)),
             accepted,
-            shadowRunIds: [...inc.runIds, ...cand.runIds],
-            cost: { tokens: inc.tokens + cand.tokens, calls: inc.calls + cand.calls, usd: inc.usd + cand.usd },
+            shadowRunIds: billed.runIds,
+            cost: billed.cost,
           },
         });
         if (!accepted) r.emit1({ type: 'MUTATION_REJECTED', actorId: 'controller', payload: { proposalId: p.id, reason: `candidate ${cand.fitness.toFixed(3)} ≤ incumbent ${inc.fitness.toFixed(3)} + δ ${c.delta}` } });
@@ -252,7 +293,77 @@ export class EvolutionController {
     return [...recent, ...hist];
   }
 
-  private async evaluate(genome: OrganizationGenome, buffer: HistoryItem[], tag: string): Promise<{ fitness: number; tokens: number; calls: number; usd: number; runIds: string[] }> {
+  private contributionRound = 0;
+
+  /** Idea 25: replay the buffer without one agent (rotating) and record what it adds; a non-contributor becomes a proposal. */
+  private async contribution(d: Diagnosis, buffer: HistoryItem[], run: (g: OrganizationGenome, t: HistoryItem[], tag: string) => Promise<Evaluation>, bill: (...e: Evaluation[]) => { runIds: string[]; cost: { tokens: number; calls: number; usd: number } }): Promise<MutationProposal | null> {
+    const r = this.o.runner;
+    const g = r.genome;
+    const others = g.agents.map((a) => a.id).filter((id) => id !== g.entryAgentId).sort();
+    if (!others.length || !buffer.length) return null;
+    const agentId = others[this.contributionRound++ % others.length]!;
+    let without: OrganizationGenome;
+    try {
+      without = applyMutation(g, { type: 'REMOVE_AGENT', agentId }, { createdBy: 'contribution-check' });
+    } catch {
+      return null; // removing it would break the organization's constraints
+    }
+    const inc = await run(g, buffer, 'inc');
+    const out = await run(without, buffer, 'minus');
+    const billed = bill(inc, out);
+    const delta = inc.fitness - out.fitness;
+    r.emit1({ type: 'CONTRIBUTION_MEASURED', actorId: 'controller', payload: { agentId, taskIds: buffer.map(taskIdOf), withScore: inc.fitness, withoutScore: out.fitness, delta, shadowRunIds: billed.runIds, cost: billed.cost } });
+    if (delta > 0 || d.idleAgents.includes(agentId)) return null; // it helps, or the idle-agent rule already covers it
+    return propose({ type: 'REMOVE_AGENT', agentId }, { contributionDelta: delta, withScore: inc.fitness, withoutScore: out.fitness, tasks: buffer.length }, `Without ${agentId} the organization scored ${out.fitness.toFixed(3)} vs ${inc.fitness.toFixed(3)} on ${buffer.length} replayed tasks: it does not contribute.`, 'heuristic', { costDelta: -0.1 });
+  }
+
+  /** Idea 26: the organization proposes its own structural change from the evidence (labelled proposer "llm"). */
+  private async llmProposals(d: Diagnosis): Promise<MutationProposal[]> {
+    const r = this.o.runner;
+    const g = r.genome;
+    const vocab = this.vocab ?? roleVocabulary(g);
+    const lessons = r.memory
+      .all()
+      .filter((m) => (m.tags ?? []).includes('lesson'))
+      .slice(-3)
+      .map((m) => `- ${truncate(m.content, 200)}`);
+    const system = 'You redesign an AI software organization. Propose at most ONE structural change that the evidence supports, or NONE. Every change is replayed on past tasks and adopted only if it scores better than the current organization.';
+    const prompt = [
+      `Organization (generation ${g.generation}); entry agent ${g.entryAgentId}.`,
+      `Agents: ${g.agents.map((a) => `${a.id} (${a.roleId})`).join(', ')}`,
+      `Edges: ${g.edges.map((e) => `${e.from}->${e.to}`).join(', ') || 'none'}`,
+      `Roles you may use: ${vocab.map((v) => v.id).join(', ')}`,
+      `Evidence from the last ${d.window} tasks: success ${(d.successRate * 100).toFixed(0)}%; failures by category ${JSON.stringify(d.failuresByCategory)} of ${JSON.stringify(d.tasksByCategory)}; idle agents: ${d.idleAgents.join(', ') || 'none'}; unused edges: ${d.unusedEdges.slice(0, 5).join(', ') || 'none'}; mean tokens per task ${Math.round(d.meanTokens)}.`,
+      ...(lessons.length ? ['Lessons the organization has recorded:', ...lessons] : []),
+      'Reply JSON {"type": "ADD_AGENT|REMOVE_AGENT|CHANGE_ROLE|ADD_EDGE|REMOVE_EDGE|NONE", "agentId": "...", "roleId": "...", "from": "...", "to": "...", "hypothesis": "what will improve and why, citing the evidence"}.',
+    ].join('\n');
+    const j = (await r.controllerCall('llm proposer', system, prompt, LLM_PROPOSAL_SCHEMA)) as Record<string, unknown> | null;
+    if (!j || j.type === 'NONE') return [];
+    const str = (k: string) => (typeof j[k] === 'string' ? (j[k] as string) : '');
+    const role = vocab.find((v) => v.id === str('roleId'));
+    const raw =
+      j.type === 'ADD_AGENT' && role
+        ? { type: 'ADD_AGENT', agent: { id: `${role.id}_g${g.generation + 1}`, name: role.name, roleId: role.id }, role }
+        : j.type === 'REMOVE_AGENT'
+          ? { type: 'REMOVE_AGENT', agentId: str('agentId') }
+          : j.type === 'CHANGE_ROLE' && role
+            ? { type: 'CHANGE_ROLE', agentId: str('agentId'), role }
+            : j.type === 'ADD_EDGE'
+              ? { type: 'ADD_EDGE', edge: { from: str('from'), to: str('to'), kind: 'delegate' } }
+              : j.type === 'REMOVE_EDGE'
+                ? { type: 'REMOVE_EDGE', from: str('from'), to: str('to') }
+                : null;
+    const m = raw ? Mutation.safeParse(raw) : null;
+    if (!m?.success) {
+      r.emit1({ type: 'ANOMALY_DETECTED', actorId: 'controller', payload: { kind: 'llm-proposal-unusable', detail: truncate(JSON.stringify(j), 400) } });
+      return [];
+    }
+    const hypothesis = truncate(str('hypothesis') || 'no hypothesis given', 400);
+    const worst = Object.entries(d.failuresByCategory).sort((a, b) => b[1] - a[1])[0];
+    return [propose(m.data, { window: d.window, successRate: d.successRate, ...(worst ? { worstCategory: worst[0], failuresInWindow: worst[1] } : {}), idleAgents: d.idleAgents.join(',') }, hypothesis, 'llm')];
+  }
+
+  private async evaluate(genome: OrganizationGenome, buffer: HistoryItem[], tag: string): Promise<Evaluation> {
     const parent = this.o.runner;
     const runId = `${parent.runId}-val${++this.shadowCount}-${tag}`;
     const cfg = buildRunConfig({ ...parent.config, runId, label: `validation shadow of ${parent.runId}`, genome, evolution: { ...parent.config.evolution, enabled: false } });
@@ -273,5 +384,33 @@ export class EvolutionController {
     return { fitness: score / n - (this.o.config.fitnessCostPer1kTokens * tokens) / n / 1000, tokens: s.tokens, calls: s.calls, usd: s.usd, runIds: [runId] };
   }
 }
+
+interface Evaluation {
+  fitness: number;
+  tokens: number;
+  calls: number;
+  usd: number;
+  runIds: string[];
+}
+
+const taskIdOf = (h: HistoryItem) => (h.spec.kind === 'bench' ? h.spec.task.id : h.outcome.taskId);
+const sum = (es: Evaluation[], k: 'tokens' | 'calls' | 'usd') => es.reduce((a, e) => a + e[k], 0);
+/** Same fitness F as shadow validation, from observed outcomes. */
+const fitnessOf = (outs: Array<{ score: number; tokens: number }>, costPer1k: number) => (outs.length ? outs.reduce((a, o) => a + o.score, 0) / outs.length - (costPer1k * outs.reduce((a, o) => a + o.tokens, 0)) / outs.length / 1000 : 0);
+/** Identity of an organization's structure, ignoring ids and lineage. */
+const structure = (g: OrganizationGenome) => JSON.stringify([g.entryAgentId, g.agents.map((a) => [a.id, a.roleId]).sort(), g.edges.map((e) => [e.from, e.to, e.kind]).sort(), g.roles.map((x) => x.id).sort(), g.policies]);
+
+const LLM_PROPOSAL_SCHEMA = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', enum: ['ADD_AGENT', 'REMOVE_AGENT', 'CHANGE_ROLE', 'ADD_EDGE', 'REMOVE_EDGE', 'NONE'] },
+    agentId: { type: 'string' },
+    roleId: { type: 'string' },
+    from: { type: 'string' },
+    to: { type: 'string' },
+    hypothesis: { type: 'string' },
+  },
+  required: ['type', 'hypothesis'],
+};
 
 export { validateGenome, capabilitiesOf };

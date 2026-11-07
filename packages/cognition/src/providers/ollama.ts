@@ -3,6 +3,8 @@ import { CognitionError, type CognitionProvider, type CognitionRequest, type Cog
 export interface OllamaOptions {
   baseUrl?: string;
   seed?: number;
+  /** num_ctx; unset = the Ollama server default. */
+  contextTokens?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -18,6 +20,7 @@ export class OllamaProvider implements CognitionProvider {
     const started = Date.now();
     const options: Record<string, unknown> = { num_predict: req.maxOutputTokens ?? 2048, temperature: req.temperature ?? 0 };
     if (this.opts.seed !== undefined) options.seed = this.opts.seed;
+    if (this.opts.contextTokens !== undefined) options.num_ctx = this.opts.contextTokens;
     let res: Response;
     try {
       res = await (this.opts.fetchImpl ?? fetch)(`${this.opts.baseUrl ?? process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434'}/api/chat`, {

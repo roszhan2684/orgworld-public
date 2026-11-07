@@ -31,6 +31,8 @@ export const ModelConfig = z
     /** Only honoured by providers that support it (ollama). */
     seed: z.number().int().optional(),
     maxOutputTokensPerCall: z.number().int().positive().default(2048),
+    /** Context window in tokens (ollama `num_ctx`). Unset = the server default, which can change between versions. */
+    contextTokens: z.number().int().min(2048).optional(),
     /** Paid API providers: price per model id. Required by anthropic-api so budgets are enforced in USD. */
     pricing: z.record(z.string(), ModelPricing).optional(),
   })
@@ -92,6 +94,32 @@ export const FeatureFlags = z
     meetings: z.boolean().default(true),
     decisions: z.boolean().default(true),
     beliefs: z.boolean().default(true),
+    // Organization-behaviour extensions (conflict C-21). Optional with no default: absent = off, and configs that do
+    // not set them keep the same parsed form and hash as before they existed.
+    /** After a failed task (and a category's first success) the team asks why, up to three levels, and keeps the lesson. */
+    afterActionReview: z.boolean().optional(),
+    /** Successful approaches are kept per task category and offered when a similar task starts. */
+    playbook: z.boolean().optional(),
+    /** Lessons are scored by the outcomes of the tasks that used them; unhelpful ones stop being offered. */
+    lessonScoring: z.boolean().optional(),
+    /** Decisions keep their prediction and actual outcome; similar past decisions are shown to voters. */
+    decisionJournal: z.boolean().optional(),
+    /** On disagreement: a critic argues against the leading option, a supporter rebuts, everyone votes again. */
+    debate: z.boolean().optional(),
+    /** Votes and arguments that cite no evidence the agent can see count half. */
+    evidenceRule: z.boolean().optional(),
+    /** First-round votes are cast without seeing the proposer's recommendation; dissent is kept as a minority report. */
+    blindVote: z.boolean().optional(),
+    /** Without a majority after the last round, the agent with decision authority settles it. */
+    tieBreak: z.boolean().optional(),
+    /** After a decision, a critic imagines it failed and names the risks and a mitigation. */
+    preMortem: z.boolean().optional(),
+    /** Before a task, the entry agent sketches alternative plans with predicted success and follows the best. */
+    multiPath: z.boolean().optional(),
+    /** Predictions are scored against outcomes; calibration (not raw success count) sets vote weight. */
+    trackRecord: z.boolean().optional(),
+    /** Agents see who in their contacts has done well at which task category. */
+    expertiseDirectory: z.boolean().optional(),
   })
   .strict();
 export type FeatureFlags = z.infer<typeof FeatureFlags>;
@@ -128,6 +156,10 @@ export const EvolutionConfig = z
     fitnessCostPer1kTokens: z.number().min(0).default(0.002),
     mutationSet: z.enum(['paper1', 'extended']).default('paper1'),
     proposer: z.enum(['heuristic', 'llm', 'both', 'random']).default('heuristic'),
+    /** Before full validation, test each proposal on the recently failed tasks only (C-21). */
+    counterfactualReview: z.boolean().optional(),
+    /** At each trigger, measure one agent's contribution by re-running tasks without it (C-21). */
+    contributionCheck: z.boolean().optional(),
     maxProposalsPerTrigger: z.number().int().positive().default(2),
     rollback: z
       .object({

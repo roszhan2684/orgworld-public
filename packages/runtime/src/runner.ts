@@ -34,24 +34,13 @@ import { IMPLEMENTED_POLICIES, resolveDecision, type Ballot } from './decisions.
 import { MemoryIndex, type MemoryItem } from './memory.ts';
 import { allowedActions, systemPrompt, taskBrief, turnPrompt } from './prompts.ts';
 import { RepoReader } from './repo-tools.ts';
+import { InfrastructureError } from './errors.ts';
+import { afterTaskLearning, deliberate, planPaths, taskStartLearning, usesDeliberation } from './organization.ts';
 import type { TaskOutcome, TaskSpec } from './tasks.ts';
 
 export class RunStopped extends Error {}
 
-/**
- * The model service failed in a way that says nothing about the agents: retries exhausted on a transient error
- * (rate limit, overload, 5xx, network) or a fatal configuration error (auth, billing, bad request). It is never
- * scored as a failed task; it propagates and stops the run, which experiments exclude and re-attempt (C-19).
- */
-export class InfrastructureError extends Error {
-  constructor(
-    message: string,
-    readonly attempts: number,
-  ) {
-    super(message);
-    this.name = 'InfrastructureError';
-  }
-}
+export { InfrastructureError } from './errors.ts';
 
 export interface RetryPolicy {
   /** Total attempts per model call, including the first. */
@@ -106,7 +95,8 @@ export function createRun(store: EventStore, config: RunConfig): RunConfig {
   return config;
 }
 
-interface TaskCtx {
+/** Per-task working state (internal; shared with organization.ts). */
+export interface TaskCtx {
   taskId: string;
   spec: TaskSpec;
   ledger: BudgetLedger;
@@ -119,6 +109,10 @@ interface TaskCtx {
   pendingMemories: Record<string, MemoryItem[]>;
   structuralChangesBefore: number;
   stalls: number;
+  /** Learning memories (lessons, playbook) offered at task start, scored when the task ends (C-21). */
+  learningIds: string[];
+  /** The plan chosen by multi-path planning and its predicted success (C-21). */
+  plan: { planId: string; predicted: number; agentId: string } | null;
 }
 
 /**
@@ -263,7 +257,8 @@ export class OrgRunner {
 
   /* ------------------------------------------------------------------ cognition */
 
-  private async think(agentId: string | null, taskId: string | null, ledger: BudgetLedger | null, purpose: string, system: string, prompt: string, schema: Record<string, unknown>, causedBy: string | null, category: CallCategory = this.category): Promise<{ result: CognitionResult; completedEventId: string } | { refused: string }> {
+  /** One model call with budget checks, events and retries. Internal; also used by organization.ts. */
+  async think(agentId: string | null, taskId: string | null, ledger: BudgetLedger | null, purpose: string, system: string, prompt: string, schema: Record<string, unknown>, causedBy: string | null, category: CallCategory = this.category, opts: { maxOutputTokens?: number } = {}): Promise<{ result: CognitionResult; completedEventId: string } | { refused: string }> {
     for (const [scope, l] of [['task', ledger], ['run', this.runLedger]] as const) {
       if (!l) continue;
       const c = l.canStartCall();
@@ -278,7 +273,7 @@ export class OrgRunner {
       const callId = newId('call');
       this.emit1({ type: 'MODEL_CALL_STARTED', actorId: agentId ?? 'runtime', payload: { callId, agentId, taskId, category, purpose: truncate(purpose, 120), provider: this.provider.id, model }, causedBy });
       try {
-        const result = await this.provider.complete({ system, prompt, jsonSchema: schema, model, maxOutputTokens: this.config.model.maxOutputTokensPerCall, ...(this.config.model.temperature !== undefined ? { temperature: this.config.model.temperature } : {}), purpose });
+        const result = await this.provider.complete({ system, prompt, jsonSchema: schema, model, maxOutputTokens: Math.min(opts.maxOutputTokens ?? Infinity, this.config.model.maxOutputTokensPerCall), ...(this.config.model.temperature !== undefined ? { temperature: this.config.model.temperature } : {}), purpose });
         ledger?.record(result.usage, result.costUsd);
         this.runLedger.record(result.usage, result.costUsd);
         const [done] = this.emit([
@@ -329,6 +324,8 @@ export class OrgRunner {
       pendingMemories: {},
       structuralChangesBefore: this.pendingStructuralChanges,
       stalls: 0,
+      learningIds: [],
+      plan: null,
     };
     this.pendingStructuralChanges = 0;
     const bench = spec.kind === 'bench' ? spec.task : null;
@@ -353,6 +350,8 @@ export class OrgRunner {
     ]);
     // Organizational memory retrieval at task start (only when cross-task memory is enabled).
     if (this.config.features.crossTaskMemory && this.memory.size > 0) this.recall(ctx, g.entryAgentId, taskBrief(spec).slice(0, 400), 'task-start');
+    taskStartLearning(this, ctx); // lessons and playbook (C-21; no model call)
+    await planPaths(this, ctx); // multi-path planning (C-21; one call when enabled)
 
     let stopReason: TaskOutcome['stopReason'] = 'max-turns';
     try {
@@ -476,13 +475,13 @@ export class OrgRunner {
     return 'ok';
   }
 
-  private reject(ctx: TaskCtx, agentId: string, action: string, reason: string, causedBy: string | null): void {
+  reject(ctx: TaskCtx, agentId: string, action: string, reason: string, causedBy: string | null): void {
     this.emit1({ type: 'ACTION_REJECTED', actorId: 'runtime', payload: { agentId, action, reason, taskId: ctx.taskId }, causedBy });
     (ctx.pendingFeedback[agentId] ??= []).push(`Your ${action} action was rejected: ${reason}`);
     this.enqueue(ctx, agentId);
   }
 
-  private knows(agentId: string, artifactId: string): boolean {
+  knows(agentId: string, artifactId: string): boolean {
     return !!this.state.agents[agentId]?.knownArtifactIds.includes(artifactId);
   }
 
@@ -623,7 +622,7 @@ export class OrgRunner {
     }
   }
 
-  private recall(ctx: TaskCtx, agentId: string, query: string, cause: string): void {
+  recall(ctx: TaskCtx, agentId: string, query: string, cause: string): void {
     const t0 = performance.now();
     const agent = this.state.agents[agentId]!;
     const { items, denied } = this.memory.retrieve(query, agentId, agent.teamId, this.genome.policies.memoryRead);
@@ -631,11 +630,12 @@ export class OrgRunner {
     ctx.pendingMemories[agentId] = [...(ctx.pendingMemories[agentId] ?? []), ...items];
   }
 
-  private contacts(agentId: string, requested: string[]): string[] {
+  contacts(agentId: string, requested: string[]): string[] {
     return [...new Set(requested)].filter((p) => p !== agentId && hasEdge(this.genome, agentId, p) && !this.state.agents[p]?.removed);
   }
 
   private async runDecision(ctx: TaskCtx, agentId: string, a: Extract<Action, { type: 'propose_decision' }>, cause: string): Promise<void> {
+    if (usesDeliberation(this.config)) return deliberate(this, ctx, agentId, a, cause); // C-21 extensions
     const g = this.genome;
     const policy = g.policies.decision;
     if (!IMPLEMENTED_POLICIES.has(policy)) return this.reject(ctx, agentId, a.type, `decision policy ${policy} is not implemented in v0.1`, cause);
@@ -754,7 +754,8 @@ export class OrgRunner {
     if (stopReason === 'stopped' || stopReason === 'entry-failed' || (!artifactId && stopReason !== 'submitted'))
       drafts.push({ type: 'TASK_FAILED', actorId: 'runtime', payload: { taskId: ctx.taskId, reason: artifactId ? stopReason : `${stopReason}: no deliverable produced`, score } });
     else drafts.push({ type: 'TASK_COMPLETED', actorId: 'runtime', payload: { taskId: ctx.taskId, success, score, submittedArtifactId: artifactId, submittedBy: ctx.submitted?.by ?? null, forced } });
-    this.emit(drafts);
+    const outcomeEvents = this.emit(drafts);
+    await afterTaskLearning(this, ctx, { success, score, stopReason, outcomeEventId: outcomeEvents[outcomeEvents.length - 1]!.eventId, artifactId }); // C-21 (when enabled)
     this.log(`task ${bench?.id ?? t.title}: ${success ? 'SUCCESS' : 'FAIL'} score=${score.toFixed(2)} turns=${ctx.turns} stop=${stopReason}`);
     return {
       taskId: ctx.taskId,

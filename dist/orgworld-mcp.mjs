@@ -28742,6 +28742,8 @@ var ModelConfig = external_exports.object({
   /** Only honoured by providers that support it (ollama). */
   seed: external_exports.number().int().optional(),
   maxOutputTokensPerCall: external_exports.number().int().positive().default(2048),
+  /** Context window in tokens (ollama `num_ctx`). Unset = the server default, which can change between versions. */
+  contextTokens: external_exports.number().int().min(2048).optional(),
   /** Paid API providers: price per model id. Required by anthropic-api so budgets are enforced in USD. */
   pricing: external_exports.record(external_exports.string(), ModelPricing).optional()
 }).strict();
@@ -28779,7 +28781,33 @@ var FeatureFlags = external_exports.object({
   relationships: external_exports.boolean().default(false),
   meetings: external_exports.boolean().default(true),
   decisions: external_exports.boolean().default(true),
-  beliefs: external_exports.boolean().default(true)
+  beliefs: external_exports.boolean().default(true),
+  // Organization-behaviour extensions (conflict C-21). Optional with no default: absent = off, and configs that do
+  // not set them keep the same parsed form and hash as before they existed.
+  /** After a failed task (and a category's first success) the team asks why, up to three levels, and keeps the lesson. */
+  afterActionReview: external_exports.boolean().optional(),
+  /** Successful approaches are kept per task category and offered when a similar task starts. */
+  playbook: external_exports.boolean().optional(),
+  /** Lessons are scored by the outcomes of the tasks that used them; unhelpful ones stop being offered. */
+  lessonScoring: external_exports.boolean().optional(),
+  /** Decisions keep their prediction and actual outcome; similar past decisions are shown to voters. */
+  decisionJournal: external_exports.boolean().optional(),
+  /** On disagreement: a critic argues against the leading option, a supporter rebuts, everyone votes again. */
+  debate: external_exports.boolean().optional(),
+  /** Votes and arguments that cite no evidence the agent can see count half. */
+  evidenceRule: external_exports.boolean().optional(),
+  /** First-round votes are cast without seeing the proposer's recommendation; dissent is kept as a minority report. */
+  blindVote: external_exports.boolean().optional(),
+  /** Without a majority after the last round, the agent with decision authority settles it. */
+  tieBreak: external_exports.boolean().optional(),
+  /** After a decision, a critic imagines it failed and names the risks and a mitigation. */
+  preMortem: external_exports.boolean().optional(),
+  /** Before a task, the entry agent sketches alternative plans with predicted success and follows the best. */
+  multiPath: external_exports.boolean().optional(),
+  /** Predictions are scored against outcomes; calibration (not raw success count) sets vote weight. */
+  trackRecord: external_exports.boolean().optional(),
+  /** Agents see who in their contacts has done well at which task category. */
+  expertiseDirectory: external_exports.boolean().optional()
 }).strict();
 var ABLATIONS = [
   "no-persistence",
@@ -28815,6 +28843,10 @@ var EvolutionConfig = external_exports.object({
   fitnessCostPer1kTokens: external_exports.number().min(0).default(2e-3),
   mutationSet: external_exports.enum(["paper1", "extended"]).default("paper1"),
   proposer: external_exports.enum(["heuristic", "llm", "both", "random"]).default("heuristic"),
+  /** Before full validation, test each proposal on the recently failed tasks only (C-21). */
+  counterfactualReview: external_exports.boolean().optional(),
+  /** At each trigger, measure one agent's contribution by re-running tasks without it (C-21). */
+  contributionCheck: external_exports.boolean().optional(),
   maxProposalsPerTrigger: external_exports.number().int().positive().default(2),
   rollback: external_exports.object({
     enabled: external_exports.boolean().default(true),
@@ -28944,6 +28976,7 @@ var Provenance = external_exports.object({
 var id = external_exports.string().min(1);
 var nid = external_exports.string().nullable();
 var rec = external_exports.record(external_exports.string(), external_exports.unknown());
+var ShadowCost = external_exports.object({ tokens: external_exports.number(), calls: external_exports.number(), usd: external_exports.number() }).strict();
 var EventPayloads = {
   RUN_CREATED: external_exports.object({ config: RunConfig }).strict(),
   RUN_STARTED: external_exports.object({}).strict(),
@@ -29054,7 +29087,21 @@ var EventPayloads = {
     participants: external_exports.array(id),
     taskId: nid
   }).strict(),
-  VOTE_CAST: external_exports.object({ decisionId: id, agentId: id, option: external_exports.string(), rationale: external_exports.string().max(1e3), weight: external_exports.number() }).strict(),
+  VOTE_CAST: external_exports.object({
+    decisionId: id,
+    agentId: id,
+    option: external_exports.string(),
+    rationale: external_exports.string().max(1e3),
+    weight: external_exports.number(),
+    // C-21 extensions (absent unless the feature is on)
+    round: external_exports.number().int().positive().optional(),
+    previousOption: external_exports.string().optional(),
+    blind: external_exports.boolean().optional(),
+    /** Predicted probability that the task succeeds if this option is chosen. */
+    confidence: external_exports.number().min(0).max(1).optional(),
+    evidence: external_exports.array(external_exports.string()).optional(),
+    evidenceWeight: external_exports.number().optional()
+  }).strict(),
   DECISION_COMPLETED: external_exports.object({
     decisionId: id,
     chosen: external_exports.string(),
@@ -29062,7 +29109,11 @@ var EventPayloads = {
     policy: external_exports.string(),
     tally: external_exports.record(external_exports.string(), external_exports.number()),
     rationale: external_exports.string(),
-    opposition: external_exports.array(external_exports.string())
+    opposition: external_exports.array(external_exports.string()),
+    rounds: external_exports.number().int().positive().optional(),
+    predictedSuccess: external_exports.number().min(0).max(1).optional(),
+    minorityReport: external_exports.string().max(2e3).optional(),
+    tieBreakBy: external_exports.string().optional()
   }).strict(),
   MEMORY_WRITTEN: external_exports.object({
     memoryId: id,
@@ -29071,7 +29122,9 @@ var EventPayloads = {
     ownerAgentId: external_exports.string().optional(),
     teamId: external_exports.string().optional(),
     content: external_exports.string().max(4e3),
-    provenance: Provenance
+    provenance: Provenance,
+    /** e.g. lesson, playbook, decision, category:security */
+    tags: external_exports.array(external_exports.string().max(64)).max(8).optional()
   }).strict(),
   MEMORY_RETRIEVED: external_exports.object({
     agentId: id,
@@ -29190,6 +29243,30 @@ var EventPayloads = {
   TEAM_DISSOLVED: external_exports.object({ teamId: id }).strict(),
   PROBE_EVALUATED: external_exports.object({ probeId: id, purpose: external_exports.string(), genomeId: id, taskId: id, score: external_exports.number() }).strict(),
   ANOMALY_DETECTED: external_exports.object({ kind: external_exports.string(), detail: external_exports.string() }).strict(),
+  // Organization-behaviour extensions (conflict C-21): learning, deliberation, prediction, organization checks.
+  REFLECTION_RECORDED: external_exports.object({ taskId: id, agentId: id, success: external_exports.boolean(), category: external_exports.string().nullable(), whys: external_exports.array(external_exports.string().max(400)).max(3), lesson: external_exports.string().max(600), memoryId: nid }).strict(),
+  LESSON_EVALUATED: external_exports.object({ memoryId: id, taskId: id, success: external_exports.boolean(), uses: external_exports.number().int(), wins: external_exports.number().int(), utility: external_exports.number(), baseline: external_exports.number(), retired: external_exports.boolean() }).strict(),
+  DECISION_REVIEWED: external_exports.object({ decisionId: id, taskId: id, chosen: external_exports.string(), predictedSuccess: external_exports.number().min(0).max(1).nullable(), taskSuccess: external_exports.boolean(), memoryId: nid }).strict(),
+  ARGUMENT_MADE: external_exports.object({
+    argumentId: id,
+    decisionId: id,
+    agentId: id,
+    round: external_exports.number().int().positive(),
+    stance: external_exports.enum(["against", "rebuttal", "premortem"]),
+    option: external_exports.string(),
+    content: external_exports.string().max(1500),
+    evidence: external_exports.array(external_exports.string()),
+    evidenceValid: external_exports.boolean()
+  }).strict(),
+  PLANS_PROPOSED: external_exports.object({
+    taskId: id,
+    agentId: id,
+    plans: external_exports.array(external_exports.object({ planId: external_exports.string(), summary: external_exports.string().max(400), predictedSuccess: external_exports.number().min(0).max(1) }).strict()).min(1).max(3),
+    chosenPlanId: external_exports.string()
+  }).strict(),
+  PREDICTION_SCORED: external_exports.object({ taskId: id, agentId: id, source: external_exports.enum(["plan", "vote"]), refId: external_exports.string(), predicted: external_exports.number().min(0).max(1), actual: external_exports.union([external_exports.literal(0), external_exports.literal(1)]), brier: external_exports.number().min(0).max(1) }).strict(),
+  COUNTERFACTUAL_EVALUATED: external_exports.object({ proposalId: id, taskIds: external_exports.array(external_exports.string()), incumbentScore: external_exports.number(), alternativeScore: external_exports.number(), better: external_exports.boolean(), shadowRunIds: external_exports.array(external_exports.string()), cost: ShadowCost }).strict(),
+  CONTRIBUTION_MEASURED: external_exports.object({ agentId: id, taskIds: external_exports.array(external_exports.string()), withScore: external_exports.number(), withoutScore: external_exports.number(), delta: external_exports.number(), shadowRunIds: external_exports.array(external_exports.string()), cost: ShadowCost }).strict(),
   CONTAMINATION_RECORDED: external_exports.object({ source: external_exports.string(), action: external_exports.string(), detail: external_exports.string() }).strict()
 };
 var EVENT_TYPES = Object.keys(EventPayloads);
@@ -29352,6 +29429,9 @@ var ARTIFACT_ROOM = {
   decision_record: "decision",
   evaluation: "analysis"
 };
+function emptyLearning() {
+  return { reflections: [], lessons: {}, decisionReviews: [], arguments: [], plans: [], predictions: [], counterfactuals: [], contributions: [] };
+}
 var emptyBucket = () => ({ calls: 0, tokens: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
 function initialWorldState() {
   return {
@@ -29921,12 +30001,70 @@ function applyEvent(s, e) {
       s.contaminated = true;
       tl(`Contamination: ${e.payload.action} (${e.payload.source})`);
       break;
+    case "REFLECTION_RECORDED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).reflections.push({ ...p, seq });
+      setActivity(p.agentId, "working", `reviewing why the task ${p.success ? "passed" : "failed"}`, "library");
+      tl(`${p.agentId} reviewed the task (${p.success ? "passed" : "failed"}): ${p.lesson}`, p.memoryId);
+      break;
+    }
+    case "LESSON_EVALUATED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).lessons[p.memoryId] = { ...p, seq };
+      if (p.retired) tl(`Lesson ${p.memoryId} retired: helped ${p.wins}/${p.uses} tasks (baseline ${(p.baseline * 100).toFixed(0)}%)`, p.memoryId);
+      break;
+    }
+    case "DECISION_REVIEWED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).decisionReviews.push({ ...p, seq });
+      tl(`Decision ${p.decisionId} reviewed: chose ${p.chosen}, task ${p.taskSuccess ? "passed" : "failed"}${p.predictedSuccess === null ? "" : ` (predicted ${(p.predictedSuccess * 100).toFixed(0)}%)`}`, p.decisionId);
+      break;
+    }
+    case "ARGUMENT_MADE": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).arguments.push({ ...p, seq });
+      setActivity(p.agentId, "working", `${p.stance === "premortem" ? "pre-mortem on" : p.stance === "against" ? "arguing against" : "defending"} ${p.option}`, "decision");
+      tl(`${p.agentId} ${p.stance === "premortem" ? "pre-mortem" : p.stance === "against" ? "argues against" : "rebuts for"} "${p.option}": ${p.content}`, p.decisionId);
+      break;
+    }
+    case "PLANS_PROPOSED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).plans.push({ ...p, seq });
+      const best = p.plans.find((x) => x.planId === p.chosenPlanId);
+      setActivity(p.agentId, "thinking", `weighing ${p.plans.length} plans`, "decision");
+      tl(`${p.agentId} weighed ${p.plans.length} plans; chose ${p.chosenPlanId}${best ? ` (predicted ${(best.predictedSuccess * 100).toFixed(0)}%)` : ""}`, p.taskId);
+      break;
+    }
+    case "PREDICTION_SCORED":
+      (s.learning ??= emptyLearning()).predictions.push({ ...e.payload, seq });
+      break;
+    case "COUNTERFACTUAL_EVALUATED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).counterfactuals.push({ ...p, seq });
+      chargeShadow(s, p.cost);
+      tl(`Counterfactual for ${p.proposalId}: ${p.alternativeScore.toFixed(2)} vs current ${p.incumbentScore.toFixed(2)} on ${p.taskIds.length} failed task(s)`, p.proposalId);
+      break;
+    }
+    case "CONTRIBUTION_MEASURED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).contributions.push({ ...p, seq });
+      chargeShadow(s, p.cost);
+      tl(`Contribution of ${p.agentId}: ${p.delta >= 0 ? "+" : ""}${p.delta.toFixed(2)} (with ${p.withScore.toFixed(2)}, without ${p.withoutScore.toFixed(2)})`, p.agentId);
+      break;
+    }
     default: {
       const never2 = e;
       throw new ReducerError(`unhandled event type ${never2.type}`);
     }
   }
   return s;
+}
+function chargeShadow(s, cost) {
+  for (const b of [s.costs.total, s.costs.byCategory.validation]) {
+    b.calls += cost.calls;
+    b.tokens += cost.tokens;
+    b.usd += cost.usd;
+  }
 }
 function fmt(n) {
   return n === null ? "n/a" : n.toFixed(3);
@@ -38511,7 +38649,12 @@ var MemoryIndex = class {
     if (item.scope === "team") return !!teamId && item.teamId === teamId;
     return memoryRead === "org";
   }
-  retrieve(query, agentId, teamId, memoryRead, k = 3) {
+  /**
+   * `opts` (C-21): `filter` limits candidates (e.g. by tag), `boost` multiplies the lexical score (e.g. lesson utility),
+   * `recentFallback` returns the newest readable candidates when none matches the query lexically.
+   */
+  retrieve(query, agentId, teamId, memoryRead, k = 3, opts = {}) {
+    if (opts.filter || opts.boost || opts.recentFallback) return this.retrieveWith(query, agentId, teamId, memoryRead, k, opts);
     const q = tokens(query);
     if (q.length === 0) return { items: [], denied: [] };
     const N = this.items.length;
@@ -38532,6 +38675,24 @@ var MemoryIndex = class {
       if (!this.canRead(it, agentId, teamId, memoryRead)) denied.push(it.memoryId);
       else if (items.length < k) items.push(it);
     }
+    return { items, denied };
+  }
+  retrieveWith(query, agentId, teamId, memoryRead, k, opts) {
+    const pool = this.items.filter((it) => !opts.filter || opts.filter(it));
+    const q = new Set(tokens(query));
+    const denied = [];
+    const readable = pool.filter((it) => {
+      const ok = this.canRead(it, agentId, teamId, memoryRead);
+      if (!ok) denied.push(it.memoryId);
+      return ok;
+    });
+    const scored = readable.map((it) => {
+      const t = tokens(it.content);
+      const overlap = t.length ? t.filter((x) => q.has(x)).length / Math.sqrt(t.length) : 0;
+      return { it, score: overlap * (opts.boost ? opts.boost(it) : 1) };
+    }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score || b.it.seq - a.it.seq);
+    let items = scored.slice(0, k).map((x) => x.it);
+    if (!items.length && opts.recentFallback) items = [...readable].sort((a, b) => (opts.boost ? opts.boost(b) - opts.boost(a) : 0) || b.seq - a.seq).slice(0, k);
     return { items, denied };
   }
 };

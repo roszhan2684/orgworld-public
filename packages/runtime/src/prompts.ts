@@ -1,5 +1,5 @@
 import type { OrganizationGenome, RunConfig } from '@orgworld/protocol';
-import { agentKnowledge, canSubmit, capabilitiesOf, roleOf, truncate, type WorldState } from '@orgworld/core';
+import { agentKnowledge, canSubmit, capabilitiesOf, expertise, roleOf, truncate, type WorldState } from '@orgworld/core';
 import type { ActionType } from './actions.ts';
 import type { TaskSpec } from './tasks.ts';
 import type { MemoryItem } from './memory.ts';
@@ -51,6 +51,7 @@ export function systemPrompt(state: WorldState, cfg: RunConfig, agentId: string,
     `You are ${me.name} (agent id "${agentId}"), one member of an AI organization working on software tasks.`,
     `Role: ${role.name} — ${role.objective}`,
     `You can message ONLY: ${contacts.length ? contacts.join(', ') : 'nobody'}.`,
+    ...(cfg.features.expertiseDirectory ? [expertiseLine(state, agentId, g.edges.filter((e) => e.from === agentId).map((e) => e.to))] : []),
     canSubmit(g, agentId)
       ? 'You are allowed to submit the final deliverable.'
       : `You cannot submit. Final deliverables are submitted by: ${submitters.join(', ')}.`,
@@ -65,6 +66,15 @@ export function systemPrompt(state: WorldState, cfg: RunConfig, agentId: string,
     'Actions you may use:',
     ...actions.map((a) => `- ${ACTION_HELP[a]}`),
   ].join('\n');
+}
+
+/** Idea 23 (C-21): who among you and your contacts has done well at which category, from this run's record. */
+function expertiseLine(state: WorldState, agentId: string, contacts: string[]): string {
+  const ex = expertise(state);
+  const parts = [agentId, ...contacts]
+    .filter((id) => ex[id])
+    .map((id) => `${id === agentId ? 'you' : id}: ${Object.entries(ex[id]!).map(([c, r]) => `${c} ${r.passed}/${r.worked}`).join(', ')}`);
+  return `Track record (finished tasks worked on that passed, by category): ${parts.length ? parts.join('; ') : 'none yet'}. Ask or delegate to whoever is strongest for the work at hand.`;
 }
 
 export interface TurnFeedback {

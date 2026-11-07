@@ -48,6 +48,8 @@ Docs: `docs/architecture/ARCHITECTURE.md`, ADRs in `docs/decisions/`, research m
 
 Conditions (same task stream, model and per-task budget): single agent (B0), fixed generalists (B1), fixed specialists (B2), per-task adaptive (B3), random persistent evolution (B7), EvoOrg (B8), plus ablations A1–A7. Metrics: cumulative reward, success per phase, adaptation half-life, lifetime cost including validation re-runs, structural churn, specialization index, topology. Statistics: 95% CI and paired bootstrap. Falsification criteria are listed in `docs/research/RESEARCH_REQUIREMENTS_MAP.md`.
 
+Optional organization behaviours are off by default and get their own pre-registered test in `experiments/organization/` (draft): learning from reviewed mistakes and successes, structured debate with evidence, scored predictions, and organization self-checks (conflict C-21, `docs/verification/PHASE-16.md`).
+
 Experiments run in nightly sessions on a free local model (`lab/`, see [lab/README.md](lab/README.md)). Every session's readings, per-run metrics and full event logs are published on the [`lab-notebook`](https://github.com/roszhan2684/orgworld-public/tree/lab-notebook) branch, including skipped, blocked and cut-short sessions.
 
 ## Limitations

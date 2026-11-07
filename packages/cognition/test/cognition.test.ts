@@ -133,6 +133,9 @@ describe('ollama provider (mock fetch, free)', () => {
     const r = await new OllamaProvider({ seed: 9, fetchImpl }).complete({ ...req, model: 'qwen', temperature: 0.1, jsonSchema: { type: 'object' } });
     expect(r).toMatchObject({ json: { a: 1 }, costUsd: 0, provider: 'ollama', samplingControlled: true, usage: { inputTokens: 50, outputTokens: 7 } });
     expect(sent).toMatchObject({ model: 'qwen', stream: true, format: { type: 'object' }, options: { seed: 9, temperature: 0.1 } });
+    expect(sent.options.num_ctx).toBeUndefined(); // server default unless configured
+    await new OllamaProvider({ contextTokens: 16384, fetchImpl }).complete({ ...req, model: 'qwen' });
+    expect(sent.options.num_ctx).toBe(16384);
   });
   it('explains when Ollama is not running', async () => {
     const fetchImpl = (async () => { throw new Error('ECONNREFUSED'); }) as unknown as typeof fetch;

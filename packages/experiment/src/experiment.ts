@@ -447,7 +447,7 @@ function readSlots(store: EventStore, config: ExperimentConfigInput, id?: string
 
 /** Research data export (build §62): one row per run, flat columns for Python/R/Jupyter. */
 export function resultsCsv(r: Pick<ExperimentResult, 'experimentId' | 'conditions'>): string {
-  const head = ['experiment_id', 'condition_id', 'condition', 'run_id', 'provider', 'scripted', 'tasks', 'successes', 'success_rate', 'cumulative_reward', 'lifetime_tokens', 'lifetime_usd', 'validation_tokens', 'messages_per_task', 'generation', 'mutations_accepted', 'mutations_rejected', 'churn_per100', 'first_half_life', 'contaminated', 'reviewer_coverage', 'reviewer_coverage_by_phase', 'first_uncovered_task', 'security_success_rate', 'audit_complete'];
+  const head = ['experiment_id', 'condition_id', 'condition', 'run_id', 'provider', 'scripted', 'tasks', 'successes', 'success_rate', 'cumulative_reward', 'lifetime_tokens', 'lifetime_usd', 'validation_tokens', 'messages_per_task', 'generation', 'mutations_accepted', 'mutations_rejected', 'churn_per100', 'first_half_life', 'contaminated', 'reviewer_coverage', 'reviewer_coverage_by_phase', 'first_uncovered_task', 'security_success_rate', 'audit_complete', 'lessons', 'lessons_retired', 'mean_lesson_utility', 'debated_decisions', 'mind_changes', 'predictions', 'prediction_brier', 'contribution_checks', 'counterfactuals'];
   const rows = r.conditions.flatMap((c) =>
     c.metrics.map((m, i) => [
       r.experimentId, c.conditionId, c.condition, c.runs[i], m.provider, m.scripted, m.tasks, m.successes, m.successRate.toFixed(4), m.cumulativeReward.toFixed(4), m.lifetime.tokens, m.lifetime.usd.toFixed(6), m.lifetime.byCategory.validation.tokens, m.communication.messagesPerTask.toFixed(3), m.generation, m.mutations.accepted, m.mutations.rejected, m.churn.per100.toFixed(3), m.halfLives[0]?.halfLife ?? '', m.contaminated,
@@ -456,6 +456,15 @@ export function resultsCsv(r: Pick<ExperimentResult, 'experimentId' | 'condition
       m.verification.firstUncoveredIndex ?? '',
       m.successByCategory.security ? m.successByCategory.security.rate.toFixed(4) : '',
       m.audit.complete,
+      m.learning.lessons,
+      m.learning.lessonsRetired,
+      m.learning.meanLessonUtility === null ? '' : m.learning.meanLessonUtility.toFixed(4),
+      m.learning.debatedDecisions,
+      m.learning.mindChanges,
+      m.learning.predictions,
+      m.learning.brier === null ? '' : m.learning.brier.toFixed(4),
+      m.learning.contributionChecks,
+      m.learning.counterfactuals,
     ]),
   );
   return [head, ...rows].map((r2) => r2.map((v) => (typeof v === 'string' && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : String(v))).join(',')).join('\n') + '\n';

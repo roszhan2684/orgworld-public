@@ -1,5 +1,5 @@
 import type { OrgEvent, OrganizationGenome } from '@orgworld/protocol';
-import { capabilitiesOf, diffGenomes, reachableFrom, reduceEvents, type WorldState } from '@orgworld/core';
+import { capabilitiesOf, deliberationView, diffGenomes, knowledgeView, reachableFrom, reduceEvents, type WorldState } from '@orgworld/core';
 
 /**
  * Research metrics (EVOORG_RESEARCH.md II-§25–§34, I-§33–§36, III). Pure functions over events/state so every
@@ -352,6 +352,49 @@ export interface RunMetrics {
   successByCategory: ReturnType<typeof successByCategory>;
   verification: VerificationCoverage;
   audit: MutationAudit;
+  /** C-21 extensions (zeros when the features are off). */
+  learning: OrgLearning;
+}
+
+export interface OrgLearning {
+  lessons: number;
+  lessonsRetired: number;
+  /** Mean utility of scored lessons (Laplace-smoothed win rate of the tasks that used them). */
+  meanLessonUtility: number | null;
+  playbookEntries: number;
+  reflections: number;
+  debatedDecisions: number;
+  mindChanges: number;
+  preMortems: number;
+  tieBreaks: number;
+  predictions: number;
+  /** Mean Brier score of scored predictions (0 = perfect, 0.25 = always saying 50%). */
+  brier: number | null;
+  contributionChecks: number;
+  counterfactuals: number;
+}
+
+/** Learning, deliberation and organization-check counts for one run (C-21). */
+export function orgLearning(s: WorldState): OrgLearning {
+  const k = knowledgeView(s);
+  const d = deliberationView(s);
+  const scored = Object.values(s.learning?.lessons ?? {});
+  const preds = s.learning?.predictions ?? [];
+  return {
+    lessons: k.items.filter((i) => i.type === 'lesson').length,
+    lessonsRetired: scored.filter((l) => l.retired).length,
+    meanLessonUtility: scored.length ? scored.reduce((a, l) => a + l.utility, 0) / scored.length : null,
+    playbookEntries: k.items.filter((i) => i.type === 'playbook').length,
+    reflections: k.reflections.length,
+    debatedDecisions: d.decisions.filter((x) => x.rounds.length > 1).length,
+    mindChanges: d.decisions.reduce((a, x) => a + x.mindChanges.length, 0),
+    preMortems: d.decisions.reduce((a, x) => a + x.arguments.filter((g) => g.stance === 'premortem').length, 0),
+    tieBreaks: d.decisions.filter((x) => x.tieBreakBy).length,
+    predictions: preds.length,
+    brier: preds.length ? preds.reduce((a, p) => a + p.brier, 0) / preds.length : null,
+    contributionChecks: s.learning?.contributions.length ?? 0,
+    counterfactuals: s.learning?.counterfactuals.length ?? 0,
+  };
 }
 
 export function runMetrics(events: OrgEvent[], opts: { halfLifeWindow?: number } = {}): RunMetrics {
@@ -388,5 +431,6 @@ export function runMetrics(events: OrgEvent[], opts: { halfLifeWindow?: number }
     successByCategory: successByCategory(r),
     verification: verificationCoverage(events, r),
     audit: mutationAudit(s),
+    learning: orgLearning(s),
   };
 }

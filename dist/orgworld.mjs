@@ -1970,7 +1970,7 @@ ${indent}${line}` : "\n";
           str2 += ",";
         } else if (ctx.options.trailingComma) {
           if (ctx.options.lineWidth > 0) {
-            reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) + (str2.length + 2) > ctx.options.lineWidth);
+            reqNewline || (reqNewline = lines.reduce((sum2, line) => sum2 + line.length + 2, 2) + (str2.length + 2) > ctx.options.lineWidth);
           }
           if (reqNewline) {
             str2 += ",";
@@ -1986,7 +1986,7 @@ ${indent}${line}` : "\n";
         return start + end;
       } else {
         if (!reqNewline) {
-          const len = lines.reduce((sum, line) => sum + line.length + 2, 2);
+          const len = lines.reduce((sum2, line) => sum2 + line.length + 2, 2);
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
@@ -14136,13 +14136,13 @@ var CC_SANITIZE = /[- ]/g;
 function isLuhnAlgo(digits) {
   let length = digits.length;
   let bit = 1;
-  let sum = 0;
+  let sum2 = 0;
   while (length) {
     const value = digits.charCodeAt(--length) - 48;
     bit ^= 1;
-    sum += bit ? [0, 2, 4, 6, 8, 1, 3, 5, 7, 9][value] : value;
+    sum2 += bit ? [0, 2, 4, 6, 8, 1, 3, 5, 7, 9][value] : value;
   }
-  return sum % 10 === 0;
+  return sum2 % 10 === 0;
 }
 function isValidCreditCard(input2) {
   if (!creditCard.test(input2))
@@ -30915,6 +30915,8 @@ var ModelConfig = external_exports.object({
   /** Only honoured by providers that support it (ollama). */
   seed: external_exports.number().int().optional(),
   maxOutputTokensPerCall: external_exports.number().int().positive().default(2048),
+  /** Context window in tokens (ollama `num_ctx`). Unset = the server default, which can change between versions. */
+  contextTokens: external_exports.number().int().min(2048).optional(),
   /** Paid API providers: price per model id. Required by anthropic-api so budgets are enforced in USD. */
   pricing: external_exports.record(external_exports.string(), ModelPricing).optional()
 }).strict();
@@ -30952,7 +30954,33 @@ var FeatureFlags = external_exports.object({
   relationships: external_exports.boolean().default(false),
   meetings: external_exports.boolean().default(true),
   decisions: external_exports.boolean().default(true),
-  beliefs: external_exports.boolean().default(true)
+  beliefs: external_exports.boolean().default(true),
+  // Organization-behaviour extensions (conflict C-21). Optional with no default: absent = off, and configs that do
+  // not set them keep the same parsed form and hash as before they existed.
+  /** After a failed task (and a category's first success) the team asks why, up to three levels, and keeps the lesson. */
+  afterActionReview: external_exports.boolean().optional(),
+  /** Successful approaches are kept per task category and offered when a similar task starts. */
+  playbook: external_exports.boolean().optional(),
+  /** Lessons are scored by the outcomes of the tasks that used them; unhelpful ones stop being offered. */
+  lessonScoring: external_exports.boolean().optional(),
+  /** Decisions keep their prediction and actual outcome; similar past decisions are shown to voters. */
+  decisionJournal: external_exports.boolean().optional(),
+  /** On disagreement: a critic argues against the leading option, a supporter rebuts, everyone votes again. */
+  debate: external_exports.boolean().optional(),
+  /** Votes and arguments that cite no evidence the agent can see count half. */
+  evidenceRule: external_exports.boolean().optional(),
+  /** First-round votes are cast without seeing the proposer's recommendation; dissent is kept as a minority report. */
+  blindVote: external_exports.boolean().optional(),
+  /** Without a majority after the last round, the agent with decision authority settles it. */
+  tieBreak: external_exports.boolean().optional(),
+  /** After a decision, a critic imagines it failed and names the risks and a mitigation. */
+  preMortem: external_exports.boolean().optional(),
+  /** Before a task, the entry agent sketches alternative plans with predicted success and follows the best. */
+  multiPath: external_exports.boolean().optional(),
+  /** Predictions are scored against outcomes; calibration (not raw success count) sets vote weight. */
+  trackRecord: external_exports.boolean().optional(),
+  /** Agents see who in their contacts has done well at which task category. */
+  expertiseDirectory: external_exports.boolean().optional()
 }).strict();
 var ABLATIONS = [
   "no-persistence",
@@ -30988,6 +31016,10 @@ var EvolutionConfig = external_exports.object({
   fitnessCostPer1kTokens: external_exports.number().min(0).default(2e-3),
   mutationSet: external_exports.enum(["paper1", "extended"]).default("paper1"),
   proposer: external_exports.enum(["heuristic", "llm", "both", "random"]).default("heuristic"),
+  /** Before full validation, test each proposal on the recently failed tasks only (C-21). */
+  counterfactualReview: external_exports.boolean().optional(),
+  /** At each trigger, measure one agent's contribution by re-running tasks without it (C-21). */
+  contributionCheck: external_exports.boolean().optional(),
   maxProposalsPerTrigger: external_exports.number().int().positive().default(2),
   rollback: external_exports.object({
     enabled: external_exports.boolean().default(true),
@@ -31117,6 +31149,7 @@ var Provenance = external_exports.object({
 var id = external_exports.string().min(1);
 var nid = external_exports.string().nullable();
 var rec = external_exports.record(external_exports.string(), external_exports.unknown());
+var ShadowCost = external_exports.object({ tokens: external_exports.number(), calls: external_exports.number(), usd: external_exports.number() }).strict();
 var EventPayloads = {
   RUN_CREATED: external_exports.object({ config: RunConfig }).strict(),
   RUN_STARTED: external_exports.object({}).strict(),
@@ -31227,7 +31260,21 @@ var EventPayloads = {
     participants: external_exports.array(id),
     taskId: nid
   }).strict(),
-  VOTE_CAST: external_exports.object({ decisionId: id, agentId: id, option: external_exports.string(), rationale: external_exports.string().max(1e3), weight: external_exports.number() }).strict(),
+  VOTE_CAST: external_exports.object({
+    decisionId: id,
+    agentId: id,
+    option: external_exports.string(),
+    rationale: external_exports.string().max(1e3),
+    weight: external_exports.number(),
+    // C-21 extensions (absent unless the feature is on)
+    round: external_exports.number().int().positive().optional(),
+    previousOption: external_exports.string().optional(),
+    blind: external_exports.boolean().optional(),
+    /** Predicted probability that the task succeeds if this option is chosen. */
+    confidence: external_exports.number().min(0).max(1).optional(),
+    evidence: external_exports.array(external_exports.string()).optional(),
+    evidenceWeight: external_exports.number().optional()
+  }).strict(),
   DECISION_COMPLETED: external_exports.object({
     decisionId: id,
     chosen: external_exports.string(),
@@ -31235,7 +31282,11 @@ var EventPayloads = {
     policy: external_exports.string(),
     tally: external_exports.record(external_exports.string(), external_exports.number()),
     rationale: external_exports.string(),
-    opposition: external_exports.array(external_exports.string())
+    opposition: external_exports.array(external_exports.string()),
+    rounds: external_exports.number().int().positive().optional(),
+    predictedSuccess: external_exports.number().min(0).max(1).optional(),
+    minorityReport: external_exports.string().max(2e3).optional(),
+    tieBreakBy: external_exports.string().optional()
   }).strict(),
   MEMORY_WRITTEN: external_exports.object({
     memoryId: id,
@@ -31244,7 +31295,9 @@ var EventPayloads = {
     ownerAgentId: external_exports.string().optional(),
     teamId: external_exports.string().optional(),
     content: external_exports.string().max(4e3),
-    provenance: Provenance
+    provenance: Provenance,
+    /** e.g. lesson, playbook, decision, category:security */
+    tags: external_exports.array(external_exports.string().max(64)).max(8).optional()
   }).strict(),
   MEMORY_RETRIEVED: external_exports.object({
     agentId: id,
@@ -31363,6 +31416,30 @@ var EventPayloads = {
   TEAM_DISSOLVED: external_exports.object({ teamId: id }).strict(),
   PROBE_EVALUATED: external_exports.object({ probeId: id, purpose: external_exports.string(), genomeId: id, taskId: id, score: external_exports.number() }).strict(),
   ANOMALY_DETECTED: external_exports.object({ kind: external_exports.string(), detail: external_exports.string() }).strict(),
+  // Organization-behaviour extensions (conflict C-21): learning, deliberation, prediction, organization checks.
+  REFLECTION_RECORDED: external_exports.object({ taskId: id, agentId: id, success: external_exports.boolean(), category: external_exports.string().nullable(), whys: external_exports.array(external_exports.string().max(400)).max(3), lesson: external_exports.string().max(600), memoryId: nid }).strict(),
+  LESSON_EVALUATED: external_exports.object({ memoryId: id, taskId: id, success: external_exports.boolean(), uses: external_exports.number().int(), wins: external_exports.number().int(), utility: external_exports.number(), baseline: external_exports.number(), retired: external_exports.boolean() }).strict(),
+  DECISION_REVIEWED: external_exports.object({ decisionId: id, taskId: id, chosen: external_exports.string(), predictedSuccess: external_exports.number().min(0).max(1).nullable(), taskSuccess: external_exports.boolean(), memoryId: nid }).strict(),
+  ARGUMENT_MADE: external_exports.object({
+    argumentId: id,
+    decisionId: id,
+    agentId: id,
+    round: external_exports.number().int().positive(),
+    stance: external_exports.enum(["against", "rebuttal", "premortem"]),
+    option: external_exports.string(),
+    content: external_exports.string().max(1500),
+    evidence: external_exports.array(external_exports.string()),
+    evidenceValid: external_exports.boolean()
+  }).strict(),
+  PLANS_PROPOSED: external_exports.object({
+    taskId: id,
+    agentId: id,
+    plans: external_exports.array(external_exports.object({ planId: external_exports.string(), summary: external_exports.string().max(400), predictedSuccess: external_exports.number().min(0).max(1) }).strict()).min(1).max(3),
+    chosenPlanId: external_exports.string()
+  }).strict(),
+  PREDICTION_SCORED: external_exports.object({ taskId: id, agentId: id, source: external_exports.enum(["plan", "vote"]), refId: external_exports.string(), predicted: external_exports.number().min(0).max(1), actual: external_exports.union([external_exports.literal(0), external_exports.literal(1)]), brier: external_exports.number().min(0).max(1) }).strict(),
+  COUNTERFACTUAL_EVALUATED: external_exports.object({ proposalId: id, taskIds: external_exports.array(external_exports.string()), incumbentScore: external_exports.number(), alternativeScore: external_exports.number(), better: external_exports.boolean(), shadowRunIds: external_exports.array(external_exports.string()), cost: ShadowCost }).strict(),
+  CONTRIBUTION_MEASURED: external_exports.object({ agentId: id, taskIds: external_exports.array(external_exports.string()), withScore: external_exports.number(), withoutScore: external_exports.number(), delta: external_exports.number(), shadowRunIds: external_exports.array(external_exports.string()), cost: ShadowCost }).strict(),
   CONTAMINATION_RECORDED: external_exports.object({ source: external_exports.string(), action: external_exports.string(), detail: external_exports.string() }).strict()
 };
 var EVENT_TYPES = Object.keys(EventPayloads);
@@ -31968,6 +32045,9 @@ var ARTIFACT_ROOM = {
   decision_record: "decision",
   evaluation: "analysis"
 };
+function emptyLearning() {
+  return { reflections: [], lessons: {}, decisionReviews: [], arguments: [], plans: [], predictions: [], counterfactuals: [], contributions: [] };
+}
 var emptyBucket = () => ({ calls: 0, tokens: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
 function initialWorldState() {
   return {
@@ -32537,12 +32617,70 @@ function applyEvent(s, e) {
       s.contaminated = true;
       tl(`Contamination: ${e.payload.action} (${e.payload.source})`);
       break;
+    case "REFLECTION_RECORDED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).reflections.push({ ...p, seq });
+      setActivity(p.agentId, "working", `reviewing why the task ${p.success ? "passed" : "failed"}`, "library");
+      tl(`${p.agentId} reviewed the task (${p.success ? "passed" : "failed"}): ${p.lesson}`, p.memoryId);
+      break;
+    }
+    case "LESSON_EVALUATED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).lessons[p.memoryId] = { ...p, seq };
+      if (p.retired) tl(`Lesson ${p.memoryId} retired: helped ${p.wins}/${p.uses} tasks (baseline ${(p.baseline * 100).toFixed(0)}%)`, p.memoryId);
+      break;
+    }
+    case "DECISION_REVIEWED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).decisionReviews.push({ ...p, seq });
+      tl(`Decision ${p.decisionId} reviewed: chose ${p.chosen}, task ${p.taskSuccess ? "passed" : "failed"}${p.predictedSuccess === null ? "" : ` (predicted ${(p.predictedSuccess * 100).toFixed(0)}%)`}`, p.decisionId);
+      break;
+    }
+    case "ARGUMENT_MADE": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).arguments.push({ ...p, seq });
+      setActivity(p.agentId, "working", `${p.stance === "premortem" ? "pre-mortem on" : p.stance === "against" ? "arguing against" : "defending"} ${p.option}`, "decision");
+      tl(`${p.agentId} ${p.stance === "premortem" ? "pre-mortem" : p.stance === "against" ? "argues against" : "rebuts for"} "${p.option}": ${p.content}`, p.decisionId);
+      break;
+    }
+    case "PLANS_PROPOSED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).plans.push({ ...p, seq });
+      const best = p.plans.find((x2) => x2.planId === p.chosenPlanId);
+      setActivity(p.agentId, "thinking", `weighing ${p.plans.length} plans`, "decision");
+      tl(`${p.agentId} weighed ${p.plans.length} plans; chose ${p.chosenPlanId}${best ? ` (predicted ${(best.predictedSuccess * 100).toFixed(0)}%)` : ""}`, p.taskId);
+      break;
+    }
+    case "PREDICTION_SCORED":
+      (s.learning ??= emptyLearning()).predictions.push({ ...e.payload, seq });
+      break;
+    case "COUNTERFACTUAL_EVALUATED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).counterfactuals.push({ ...p, seq });
+      chargeShadow(s, p.cost);
+      tl(`Counterfactual for ${p.proposalId}: ${p.alternativeScore.toFixed(2)} vs current ${p.incumbentScore.toFixed(2)} on ${p.taskIds.length} failed task(s)`, p.proposalId);
+      break;
+    }
+    case "CONTRIBUTION_MEASURED": {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).contributions.push({ ...p, seq });
+      chargeShadow(s, p.cost);
+      tl(`Contribution of ${p.agentId}: ${p.delta >= 0 ? "+" : ""}${p.delta.toFixed(2)} (with ${p.withScore.toFixed(2)}, without ${p.withoutScore.toFixed(2)})`, p.agentId);
+      break;
+    }
     default: {
       const never2 = e;
       throw new ReducerError(`unhandled event type ${never2.type}`);
     }
   }
   return s;
+}
+function chargeShadow(s, cost) {
+  for (const b of [s.costs.total, s.costs.byCategory.validation]) {
+    b.calls += cost.calls;
+    b.tokens += cost.tokens;
+    b.usd += cost.usd;
+  }
 }
 function fmt(n) {
   return n === null ? "n/a" : n.toFixed(3);
@@ -32630,6 +32768,105 @@ function agentKnowledge(s, agentId) {
       decisions: s.decisionOrder.length - decisions.length,
       memory: allMem.length - memory.length
     }
+  };
+}
+
+// packages/core/src/learning.ts
+function expertise(s) {
+  const workers = {};
+  for (const id2 of s.artifactOrder) {
+    const a = s.artifacts[id2];
+    if (a.taskId) (workers[a.taskId] ??= /* @__PURE__ */ new Set()).add(a.authorId);
+  }
+  for (const id2 of s.messageOrder) {
+    const m = s.messages[id2];
+    if (m.taskId) (workers[m.taskId] ??= /* @__PURE__ */ new Set()).add(m.from);
+  }
+  const out2 = {};
+  for (const tid of s.taskOrder) {
+    const t = s.tasks[tid];
+    if (t.success === null || !t.category) continue;
+    for (const agentId of workers[tid] ?? []) {
+      const r2 = (out2[agentId] ??= {})[t.category] ??= { worked: 0, passed: 0 };
+      r2.worked += 1;
+      if (t.success) r2.passed += 1;
+    }
+  }
+  return out2;
+}
+function calibration(s, agentId) {
+  const ps = (s.learning?.predictions ?? []).filter((p) => p.agentId === agentId);
+  if (!ps.length) return { n: 0, brier: null, score: null };
+  const brier = ps.reduce((a, p) => a + p.brier, 0) / ps.length;
+  return { n: ps.length, brier, score: 1 - brier };
+}
+function deliberationView(s) {
+  const args = s.learning?.arguments ?? [];
+  const reviews = new Map((s.learning?.decisionReviews ?? []).map((r2) => [r2.decisionId, r2]));
+  const decisions = s.decisionOrder.map((id2) => {
+    const d = s.decisions[id2];
+    const rounds = /* @__PURE__ */ new Map();
+    for (const v of d.votes) {
+      const r2 = v.round ?? 1;
+      if (!rounds.has(r2)) rounds.set(r2, []);
+      rounds.get(r2).push({ agentId: v.agentId, option: v.option, rationale: v.rationale, weight: v.weight, confidence: v.confidence ?? null, previousOption: v.previousOption ?? null, blind: v.blind ?? false });
+    }
+    const first = /* @__PURE__ */ new Map();
+    const last = /* @__PURE__ */ new Map();
+    for (const v of d.votes) {
+      if (!first.has(v.agentId)) first.set(v.agentId, v.option);
+      last.set(v.agentId, v.option);
+    }
+    const out2 = d.outcome;
+    return {
+      decisionId: id2,
+      taskId: d.taskId,
+      question: d.question,
+      options: d.options,
+      proposerId: d.proposerId,
+      recommendation: d.recommendation,
+      policy: d.policy,
+      rounds: [...rounds.entries()].sort((a, b) => a[0] - b[0]).map(([round, votes]) => ({ round, votes })),
+      arguments: args.filter((a) => a.decisionId === id2).map(({ agentId, round, stance, option, content, evidence, evidenceValid }) => ({ agentId, round, stance, option, content, evidence, evidenceValid })),
+      mindChanges: [...first.entries()].filter(([a, o]) => last.get(a) !== o).map(([agentId, from]) => ({ agentId, from, to: last.get(agentId) })),
+      chosen: out2?.chosen ?? null,
+      confidence: out2?.confidence ?? null,
+      predictedSuccess: out2?.predictedSuccess ?? null,
+      minorityReport: out2?.minorityReport ?? null,
+      tieBreakBy: out2?.tieBreakBy ?? null,
+      taskSuccess: reviews.get(id2)?.taskSuccess ?? (d.taskId ? s.tasks[d.taskId]?.success ?? null : null)
+    };
+  });
+  const agents = [...new Set((s.learning?.predictions ?? []).map((p) => p.agentId))].sort();
+  return { decisions, trackRecords: agents.map((agentId) => ({ agentId, ...(({ n, brier, score }) => ({ predictions: n, brier, score }))(calibration(s, agentId)) })) };
+}
+function knowledgeView(s) {
+  const lessons = s.learning?.lessons ?? {};
+  const items = Object.values(s.memory).sort((a, b) => a.seq - b.seq).map((m) => {
+    const tags = m.tags ?? [];
+    const ev = lessons[m.memoryId];
+    return {
+      memoryId: m.memoryId,
+      kind: m.kind,
+      content: m.content,
+      category: tags.find((t) => t.startsWith("category:"))?.slice(9) ?? null,
+      type: tags.includes("playbook") ? "playbook" : tags.includes("lesson") ? "lesson" : tags.includes("decision") ? "decision" : "other",
+      taskId: m.provenance.taskId ?? null,
+      seq: m.seq,
+      uses: ev?.uses ?? 0,
+      wins: ev?.wins ?? 0,
+      utility: ev?.utility ?? null,
+      retired: ev?.retired ?? false,
+      retrievals: m.retrievals
+    };
+  });
+  let n = 0;
+  return {
+    items,
+    reflections: (s.learning?.reflections ?? []).map(({ taskId, agentId, success: success2, category, whys, lesson, seq }) => ({ taskId, agentId, success: success2, category, whys, lesson, seq })),
+    expertise: expertise(s),
+    growth: items.map((it) => ({ seq: it.seq, items: n += 1 })),
+    contributions: (s.learning?.contributions ?? []).map(({ agentId, delta, withScore, withoutScore, seq }) => ({ agentId, delta, withScore, withoutScore, seq }))
   };
 }
 
@@ -33975,6 +34212,7 @@ var OllamaProvider = class {
     const started = Date.now();
     const options = { num_predict: req.maxOutputTokens ?? 2048, temperature: req.temperature ?? 0 };
     if (this.opts.seed !== void 0) options.seed = this.opts.seed;
+    if (this.opts.contextTokens !== void 0) options.num_ctx = this.opts.contextTokens;
     let res;
     try {
       res = await (this.opts.fetchImpl ?? fetch)(`${this.opts.baseUrl ?? process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434"}/api/chat`, {
@@ -34060,7 +34298,7 @@ function createProvider(model, opts = {}) {
     case "anthropic-api":
       return new AnthropicApiProvider({ apiKey: process.env.ANTHROPIC_API_KEY ?? "", pricing: opts.pricing ?? model.pricing ?? {} });
     case "ollama":
-      return new OllamaProvider(model.seed !== void 0 ? { seed: model.seed } : {});
+      return new OllamaProvider({ ...model.seed !== void 0 ? { seed: model.seed } : {}, ...model.contextTokens !== void 0 ? { contextTokens: model.contextTokens } : {} });
     case "scripted":
       throw new CognitionError("the scripted provider is test-only and cannot be created from configuration", false);
   }
@@ -36149,7 +36387,12 @@ var MemoryIndex = class {
     if (item.scope === "team") return !!teamId && item.teamId === teamId;
     return memoryRead === "org";
   }
-  retrieve(query, agentId, teamId, memoryRead, k = 3) {
+  /**
+   * `opts` (C-21): `filter` limits candidates (e.g. by tag), `boost` multiplies the lexical score (e.g. lesson utility),
+   * `recentFallback` returns the newest readable candidates when none matches the query lexically.
+   */
+  retrieve(query, agentId, teamId, memoryRead, k = 3, opts = {}) {
+    if (opts.filter || opts.boost || opts.recentFallback) return this.retrieveWith(query, agentId, teamId, memoryRead, k, opts);
     const q = tokens(query);
     if (q.length === 0) return { items: [], denied: [] };
     const N = this.items.length;
@@ -36172,6 +36415,24 @@ var MemoryIndex = class {
     }
     return { items, denied };
   }
+  retrieveWith(query, agentId, teamId, memoryRead, k, opts) {
+    const pool = this.items.filter((it) => !opts.filter || opts.filter(it));
+    const q = new Set(tokens(query));
+    const denied = [];
+    const readable = pool.filter((it) => {
+      const ok = this.canRead(it, agentId, teamId, memoryRead);
+      if (!ok) denied.push(it.memoryId);
+      return ok;
+    });
+    const scored = readable.map((it) => {
+      const t = tokens(it.content);
+      const overlap = t.length ? t.filter((x2) => q.has(x2)).length / Math.sqrt(t.length) : 0;
+      return { it, score: overlap * (opts.boost ? opts.boost(it) : 1) };
+    }).filter((x2) => x2.score > 0).sort((a, b) => b.score - a.score || b.it.seq - a.it.seq);
+    let items = scored.slice(0, k).map((x2) => x2.it);
+    if (!items.length && opts.recentFallback) items = [...readable].sort((a, b) => (opts.boost ? opts.boost(b) - opts.boost(a) : 0) || b.seq - a.seq).slice(0, k);
+    return { items, denied };
+  }
 };
 
 // packages/runtime/src/decisions.ts
@@ -36179,7 +36440,7 @@ var IMPLEMENTED_POLICIES = /* @__PURE__ */ new Set(["DIRECTOR", "MAJORITY", "WEI
 function resolveDecision(policy, options, ballots, recommendation) {
   if (!IMPLEMENTED_POLICIES.has(policy)) throw new Error(`decision policy ${policy} is not implemented in v0.1`);
   const tally = Object.fromEntries(options.map((o) => [o, 0]));
-  for (const b of ballots) tally[b.option] = (tally[b.option] ?? 0) + (policy === "WEIGHTED_VOTE" ? b.weight : 1);
+  for (const b of ballots) tally[b.option] = (tally[b.option] ?? 0) + (policy === "WEIGHTED_VOTE" ? b.weight : b.value ?? 1);
   const total = Object.values(tally).reduce((a, b) => a + b, 0);
   const ranked = Object.entries(tally).sort((a, b) => b[1] - a[1] || (a[0] === recommendation ? -1 : b[0] === recommendation ? 1 : 0));
   const top = ranked[0]?.[0] ?? recommendation;
@@ -36253,6 +36514,7 @@ function systemPrompt(state, cfg, agentId, actions) {
     `You are ${me.name} (agent id "${agentId}"), one member of an AI organization working on software tasks.`,
     `Role: ${role.name} \u2014 ${role.objective}`,
     `You can message ONLY: ${contacts.length ? contacts.join(", ") : "nobody"}.`,
+    ...cfg.features.expertiseDirectory ? [expertiseLine(state, agentId, g.edges.filter((e) => e.from === agentId).map((e) => e.to))] : [],
     canSubmit(g, agentId) ? "You are allowed to submit the final deliverable." : `You cannot submit. Final deliverables are submitted by: ${submitters.join(", ")}.`,
     "",
     "How this organization works:",
@@ -36265,6 +36527,11 @@ function systemPrompt(state, cfg, agentId, actions) {
     "Actions you may use:",
     ...actions.map((a) => `- ${ACTION_HELP[a]}`)
   ].join("\n");
+}
+function expertiseLine(state, agentId, contacts) {
+  const ex = expertise(state);
+  const parts = [agentId, ...contacts].filter((id2) => ex[id2]).map((id2) => `${id2 === agentId ? "you" : id2}: ${Object.entries(ex[id2]).map(([c, r2]) => `${c} ${r2.passed}/${r2.worked}`).join(", ")}`);
+  return `Track record (finished tasks worked on that passed, by category): ${parts.length ? parts.join("; ") : "none yet"}. Ask or delegate to whoever is strongest for the work at hand.`;
 }
 function taskBrief(spec) {
   if (spec.kind === "objective") return `OBJECTIVE: ${spec.title}
@@ -36293,12 +36560,12 @@ function turnPrompt(args) {
     out2.push("", "RELEVANT ORGANIZATIONAL MEMORY (with provenance):");
     for (const m of args.memories) out2.push(`- [${m.memoryId}] (${m.scope}/${m.kind}, from run ${m.runId}, task ${m.provenance.taskId ?? "-"}) ${truncate(m.content, 400)}`);
   }
-  const taskArtifacts = k.artifacts.filter((a) => a.taskId === args.taskId);
+  const taskArtifacts2 = k.artifacts.filter((a) => a.taskId === args.taskId);
   out2.push("", "ARTIFACTS YOU KNOW FOR THIS TASK (oldest \u2192 newest):");
-  if (!taskArtifacts.length) out2.push("- (none)");
-  for (const a of taskArtifacts.slice(-12)) out2.push(`- ${a.artifactId} ${a.kind} "${a.title}" by ${a.authorId}`);
+  if (!taskArtifacts2.length) out2.push("- (none)");
+  for (const a of taskArtifacts2.slice(-12)) out2.push(`- ${a.artifactId} ${a.kind} "${a.title}" by ${a.authorId}`);
   const show = /* @__PURE__ */ new Set();
-  const newestCode = [...taskArtifacts].reverse().find((a) => a.kind === "code" || a.kind === "tests");
+  const newestCode = [...taskArtifacts2].reverse().find((a) => a.kind === "code" || a.kind === "tests");
   if (newestCode) show.add(newestCode.artifactId);
   for (const m of newMsgs) for (const id2 of m.artifactIds) show.add(id2);
   for (const id2 of show) {
@@ -36348,9 +36615,7 @@ var RepoReader = class {
   }
 };
 
-// packages/runtime/src/runner.ts
-var RunStopped = class extends Error {
-};
+// packages/runtime/src/errors.ts
 var InfrastructureError = class extends Error {
   constructor(message, attempts) {
     super(message);
@@ -36358,6 +36623,360 @@ var InfrastructureError = class extends Error {
     this.name = "InfrastructureError";
   }
   attempts;
+};
+
+// packages/runtime/src/organization.ts
+var words = (x2) => new Set(x2.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2));
+function similar(stored, b) {
+  const A = words(stored.replace(/^Lesson \([^)]*\): /, ""));
+  const B = words(b);
+  const inter = [...B].filter((w) => A.has(w)).length;
+  return B.size > 0 && inter / (/* @__PURE__ */ new Set([...A, ...B])).size >= 0.6;
+}
+var clamp01 = (x2) => typeof x2 === "number" && Number.isFinite(x2) ? Math.max(0, Math.min(1, x2)) : 0.5;
+var tagsOf = (m) => m.tags ?? [];
+function usesDeliberation(cfg) {
+  const f = cfg.features;
+  return !!(f.debate || f.evidenceRule || f.blindVote || f.tieBreak || f.preMortem || f.trackRecord || f.decisionJournal);
+}
+var VOTE_SCHEMA = {
+  type: "object",
+  properties: { option: { type: "string" }, rationale: { type: "string" }, confidence: { type: "number" }, evidence: { type: "array", items: { type: "string" } } },
+  required: ["option", "rationale"],
+  additionalProperties: false
+};
+var ARGUMENT_SCHEMA = {
+  type: "object",
+  properties: { content: { type: "string" }, evidence: { type: "array", items: { type: "string" } } },
+  required: ["content"],
+  additionalProperties: false
+};
+var REVIEW_SCHEMA = {
+  type: "object",
+  properties: { whys: { type: "array", items: { type: "string" } }, lesson: { type: "string" }, approach: { type: "string" } },
+  required: ["whys", "lesson"],
+  additionalProperties: false
+};
+var PLANS_SCHEMA = {
+  type: "object",
+  properties: { plans: { type: "array", items: { type: "object", properties: { summary: { type: "string" }, predictedSuccess: { type: "number" } }, required: ["summary", "predictedSuccess"] } } },
+  required: ["plans"],
+  additionalProperties: false
+};
+async function ask(r2, agentId, ctx, purpose, prompt, schema, maxOutputTokens) {
+  const system = systemPrompt(r2.state, r2.config, agentId, ["wait"]);
+  try {
+    const res = await r2.think(agentId, ctx.taskId, ctx.ledger, purpose, system, prompt, schema, null, void 0, { maxOutputTokens });
+    if ("refused" in res) return "refused";
+    const j = res.result.json;
+    return j && typeof j === "object" && !Array.isArray(j) ? j : null;
+  } catch (err2) {
+    if (err2 instanceof InfrastructureError) throw err2;
+    r2.emit1({ type: "AGENT_FAILED", actorId: "runtime", payload: { agentId, error: truncate(String(err2), 300), recovery: "continue" } });
+    return null;
+  }
+}
+var taskArtifacts = (r2, ctx, agentId) => r2.state.agents[agentId].knownArtifactIds.filter((id2) => r2.state.artifacts[id2]?.taskId === ctx.taskId).slice(-5);
+function citedEvidence(r2, agentId, raw) {
+  const ids = Array.isArray(raw) ? raw.filter((x2) => typeof x2 === "string").slice(0, 6) : [];
+  return { ids, valid: ids.some((id2) => r2.knows(agentId, id2) || !!r2.state.memory[id2]) };
+}
+function provenance(r2, ctx, sourceEventId, outcome, artifactId) {
+  return { runId: r2.runId, taskId: ctx.taskId, genomeId: r2.genome.id, sourceEventIds: [sourceEventId], evidenceArtifactIds: artifactId ? [artifactId] : [], outcome };
+}
+function taskStartLearning(r2, ctx) {
+  const f = r2.config.features;
+  if (!(f.afterActionReview || f.playbook) || ctx.spec.kind !== "bench") return;
+  const cat = ctx.spec.task.category;
+  const entry = r2.genome.entryAgentId;
+  const me = r2.state.agents[entry];
+  if (!me) return;
+  const lesson = (id2) => r2.state.learning?.lessons[id2];
+  const usable = (it) => !(f.lessonScoring && lesson(it.memoryId)?.retired);
+  const boost = (it) => f.lessonScoring ? 0.5 + (lesson(it.memoryId)?.utility ?? 0.5) : 1;
+  const query = `${cat} ${taskBrief(ctx.spec).slice(0, 400)}`;
+  const pick3 = (filter, k) => r2.memory.retrieve(query, entry, me.teamId, r2.genome.policies.memoryRead, k, { filter: (it) => filter(it) && usable(it), boost, recentFallback: true }).items;
+  const items = [
+    ...f.afterActionReview ? pick3((it) => tagsOf(it).includes("lesson") && tagsOf(it).includes(`category:${cat}`), 2) : [],
+    ...f.playbook ? pick3((it) => tagsOf(it).includes("playbook") && tagsOf(it).includes(`category:${cat}`), 1) : []
+  ];
+  if (!items.length) return;
+  r2.emit1({ type: "MEMORY_RETRIEVED", actorId: entry, payload: { agentId: entry, query: `task start: lessons and playbook for ${cat}`, itemIds: items.map((i2) => i2.memoryId), latencyMs: 0, deniedItemIds: [] } });
+  ctx.pendingMemories[entry] = [...ctx.pendingMemories[entry] ?? [], ...items];
+  ctx.learningIds = items.map((i2) => i2.memoryId);
+}
+async function afterTaskLearning(r2, ctx, o) {
+  if (o.stopReason === "stopped") return;
+  const f = r2.config.features;
+  const s = r2.state;
+  if (f.lessonScoring && ctx.learningIds.length) {
+    const done = s.taskOrder.map((id2) => s.tasks[id2]).filter((t) => t.success !== null);
+    const baseline = (done.filter((t) => t.success).length + 1) / (done.length + 2);
+    for (const memoryId of ctx.learningIds) {
+      const prev = s.learning?.lessons[memoryId];
+      const uses = (prev?.uses ?? 0) + 1;
+      const wins = (prev?.wins ?? 0) + (o.success ? 1 : 0);
+      const utility = (wins + 1) / (uses + 2);
+      r2.emit1({ type: "LESSON_EVALUATED", actorId: "runtime", payload: { memoryId, taskId: ctx.taskId, success: o.success, uses, wins, utility, baseline, retired: uses >= 3 && utility < baseline - 0.1 } });
+    }
+  }
+  const actual = o.success ? 1 : 0;
+  if (ctx.plan) {
+    const p = ctx.plan;
+    r2.emit1({ type: "PREDICTION_SCORED", actorId: "runtime", payload: { taskId: ctx.taskId, agentId: p.agentId, source: "plan", refId: p.planId, predicted: p.predicted, actual, brier: (p.predicted - actual) ** 2 } });
+  }
+  const decisions = s.decisionOrder.map((id2) => s.decisions[id2]).filter((d) => d.taskId === ctx.taskId && d.outcome);
+  for (const d of decisions) {
+    const out2 = d.outcome;
+    if (f.trackRecord) {
+      const last = /* @__PURE__ */ new Map();
+      for (const v of d.votes) last.set(v.agentId, v);
+      for (const v of last.values())
+        if (v.option === out2.chosen && v.confidence !== void 0)
+          r2.emit1({ type: "PREDICTION_SCORED", actorId: "runtime", payload: { taskId: ctx.taskId, agentId: v.agentId, source: "vote", refId: d.decisionId, predicted: v.confidence, actual, brier: (v.confidence - actual) ** 2 } });
+    }
+    if (f.decisionJournal) {
+      const predicted = out2.predictedSuccess ?? null;
+      const decided = r2.store.events(r2.runId, { types: ["DECISION_COMPLETED"] }).find((e) => e.type === "DECISION_COMPLETED" && e.payload.decisionId === d.decisionId);
+      const memoryId = newId("mem");
+      const cat2 = ctx.spec.kind === "bench" ? ctx.spec.task.category : null;
+      r2.emit([
+        {
+          type: "MEMORY_WRITTEN",
+          actorId: d.proposerId,
+          payload: {
+            memoryId,
+            scope: "org",
+            kind: "decision",
+            content: truncate(`Decision "${d.question}" \u2192 ${out2.chosen} (${out2.policy}; ${out2.rationale})${predicted === null ? "" : `, predicted ${(predicted * 100).toFixed(0)}% success`}. The task then ${o.success ? "passed" : "failed"}.`, 1500),
+            provenance: provenance(r2, ctx, decided.eventId, o.success ? "task passed" : "task failed", null),
+            tags: ["decision", ...cat2 ? [`category:${cat2}`] : []]
+          }
+        },
+        { type: "DECISION_REVIEWED", actorId: "runtime", payload: { decisionId: d.decisionId, taskId: ctx.taskId, chosen: out2.chosen, predictedSuccess: predicted, taskSuccess: o.success, memoryId } }
+      ]);
+    }
+  }
+  const bench = ctx.spec.kind === "bench" ? ctx.spec.task : null;
+  if (!bench || !(f.afterActionReview || f.playbook)) return;
+  const cat = bench.category;
+  const firstWin = o.success && !s.taskOrder.some((id2) => id2 !== ctx.taskId && s.tasks[id2]?.category === cat && s.tasks[id2]?.success === true);
+  const author = ctx.submitted?.by ?? r2.genome.entryAgentId;
+  if (f.afterActionReview && (!o.success || firstWin)) await review(r2, ctx, author, o);
+  else if (f.playbook && firstWin) {
+    const why = (ctx.reasoning[author] ?? []).slice(-1)[0];
+    if (why) r2.emit1({ type: "MEMORY_WRITTEN", actorId: author, payload: { memoryId: newId("mem"), scope: "org", kind: "episodic", content: truncate(`Approach that passed a ${cat} task: ${why}`, 1e3), provenance: provenance(r2, ctx, o.outcomeEventId, "task passed", o.artifactId), tags: ["playbook", `category:${cat}`] } });
+  }
+}
+async function review(r2, ctx, agentId, o) {
+  if (ctx.spec.kind !== "bench") return;
+  const t = ctx.spec.task;
+  const s = r2.state;
+  const checks = Object.values(s.checkRuns).filter((c) => c.taskId === ctx.taskId && c.result);
+  const last = checks[checks.length - 1]?.result;
+  const rejected = s.rejectedActions.filter((x2) => x2.taskId === ctx.taskId);
+  const reasoning = Object.entries(ctx.reasoning).map(([a, rs]) => `- ${a}: ${rs[rs.length - 1] ?? ""}`).slice(0, 4);
+  const prompt = [
+    // Only counts from the hidden tests: their content never enters a prompt (it would leak into later tasks).
+    `TASK ${t.id} [${t.category}] "${t.title}" just ${o.success ? "PASSED" : "FAILED"} the hidden tests (score ${o.score.toFixed(2)}).`,
+    `Team record: ${ctx.turns} turn(s), ended by ${o.stopReason}; ${last ? `last public checks ${last.passed}/${last.total}` : "public checks never run"}; ${rejected.length} rejected action(s)${rejected.length ? ` (last: ${truncate(rejected[rejected.length - 1].reason, 160)})` : ""}.`,
+    ...reasoning.length ? ["Last reasoning of each teammate:", ...reasoning] : [],
+    `Ask "why did this ${o.success ? "work" : "fail"}?" up to three times, each answer explaining the one before.`,
+    `Then write ONE lesson (at most 2 sentences) the organization should apply to future ${t.category} tasks: about how the team works, not this task's code.`,
+    ...o.success ? ['Also give the approach that worked, in one sentence, as "approach".'] : [],
+    `Reply JSON {"whys": ["..."], "lesson": "..."${o.success ? ', "approach": "..."' : ""}}.`
+  ].join("\n");
+  const j = await ask(r2, agentId, ctx, "after-action review", prompt, REVIEW_SCHEMA, 350);
+  if (!j || j === "refused" || typeof j.lesson !== "string" || !j.lesson.trim()) return;
+  const whys = Array.isArray(j.whys) ? j.whys.filter((x2) => typeof x2 === "string").slice(0, 3).map((x2) => truncate(x2, 400)) : [];
+  const lesson = truncate(j.lesson.trim(), 600);
+  const same2 = r2.memory.all().find((m) => tagsOf(m).includes("lesson") && tagsOf(m).includes(`category:${t.category}`) && similar(m.content, lesson));
+  const memoryId = same2?.memoryId ?? newId("mem");
+  r2.emit([
+    ...same2 ? [] : [{ type: "MEMORY_WRITTEN", actorId: agentId, payload: { memoryId, scope: "org", kind: o.success ? "semantic" : "failure", content: `Lesson (${t.category}, from a task that ${o.success ? "passed" : "failed"}): ${lesson}`, provenance: provenance(r2, ctx, o.outcomeEventId, o.success ? "task passed" : "task failed", o.artifactId), tags: ["lesson", `category:${t.category}`] } }],
+    { type: "REFLECTION_RECORDED", actorId: agentId, payload: { taskId: ctx.taskId, agentId, success: o.success, category: t.category, whys, lesson, memoryId } }
+  ]);
+  if (o.success && r2.config.features.playbook && typeof j.approach === "string" && j.approach.trim())
+    r2.emit1({ type: "MEMORY_WRITTEN", actorId: agentId, payload: { memoryId: newId("mem"), scope: "org", kind: "episodic", content: truncate(`Approach that passed a ${t.category} task: ${j.approach.trim()}`, 1e3), provenance: provenance(r2, ctx, o.outcomeEventId, "task passed", o.artifactId), tags: ["playbook", `category:${t.category}`] } });
+}
+async function planPaths(r2, ctx) {
+  if (!r2.config.features.multiPath || ctx.spec.kind !== "bench") return;
+  const entry = r2.genome.entryAgentId;
+  const prompt = [
+    taskBrief(ctx.spec),
+    "",
+    "Before your team starts: sketch 2 or 3 genuinely different plans for this task (one sentence each) and estimate, for each, the probability (0-1) that it passes the hidden tests. Your predictions are scored against the outcome.",
+    'Reply JSON {"plans": [{"summary": "...", "predictedSuccess": 0.0}]}.'
+  ].join("\n");
+  const j = await ask(r2, entry, ctx, "plan paths", prompt, PLANS_SCHEMA, 300);
+  if (!j || j === "refused" || !Array.isArray(j.plans)) return;
+  const plans = j.plans.filter((p) => !!p && typeof p.summary === "string" && !!p.summary.trim()).slice(0, 3).map((p, i2) => ({ planId: `plan${i2 + 1}`, summary: truncate(p.summary.trim(), 400), predictedSuccess: clamp01(p.predictedSuccess) }));
+  if (!plans.length) return;
+  const best = plans.reduce((b, p) => p.predictedSuccess > b.predictedSuccess ? p : b);
+  r2.emit1({ type: "PLANS_PROPOSED", actorId: entry, payload: { taskId: ctx.taskId, agentId: entry, plans, chosenPlanId: best.planId } });
+  ctx.plan = { planId: best.planId, predicted: best.predictedSuccess, agentId: entry };
+  const others = plans.filter((p) => p !== best).map((p) => `${p.summary} (${(p.predictedSuccess * 100).toFixed(0)}%)`);
+  (ctx.pendingFeedback[entry] ??= []).push(`Plan chosen from ${plans.length} alternative(s), predicted ${(best.predictedSuccess * 100).toFixed(0)}%: ${best.summary}${others.length ? ` \u2014 set aside: ${others.join("; ")}` : ""}`);
+}
+function ballotFor(r2, agentId, option, evidenceValid) {
+  const f = r2.config.features;
+  const g = r2.genome;
+  const track = f.trackRecord ? 0.5 + (calibration(r2.state, agentId).score ?? 0.75) : null;
+  const ev = f.evidenceRule ? evidenceValid ? 1 : 0.5 : 1;
+  const base = track ?? 1 + (r2.state.agents[agentId]?.stats.successfulSubmissions ?? 0);
+  return { agentId, option, weight: base * ev, value: (track ?? 1) * ev, isEntry: agentId === g.entryAgentId, canReview: capabilitiesOf(g, agentId).includes("review") };
+}
+async function argue(r2, ctx, decisionId, question, agentId, round, stance, option, context) {
+  const instruction = stance === "against" ? `Argue in at most 3 sentences why choosing ${JSON.stringify(option)} would be a mistake.` : stance === "rebuttal" ? `Rebut in at most 3 sentences: why ${JSON.stringify(option)} is still the right choice.` : `Assume ${JSON.stringify(option)} was chosen and the task then FAILED. In at most 3 sentences name the two most likely reasons and one mitigation the team should apply now.`;
+  const prompt = [taskBrief(ctx.spec), "", `DECISION: ${question}`, ...context, instruction, `Cite the artifact ids you rely on (you know: ${taskArtifacts(r2, ctx, agentId).join(", ") || "none"}).`, 'Reply JSON {"content": "...", "evidence": ["..."]}.'].join("\n");
+  const j = await ask(r2, agentId, ctx, `${stance} on ${decisionId}`, prompt, ARGUMENT_SCHEMA, 250);
+  if (!j || j === "refused" || typeof j.content !== "string" || !j.content.trim()) return null;
+  const ev = citedEvidence(r2, agentId, j.evidence);
+  const content = truncate(j.content.trim(), 1500);
+  r2.emit1({ type: "ARGUMENT_MADE", actorId: agentId, payload: { argumentId: newId("arg"), decisionId, agentId, round, stance, option, content, evidence: ev.ids, evidenceValid: ev.valid } });
+  return truncate(content, 600);
+}
+async function deliberate(r2, ctx, proposer, a, cause) {
+  const g = r2.genome;
+  const f = r2.config.features;
+  const policy = g.policies.decision;
+  if (!IMPLEMENTED_POLICIES.has(policy)) return r2.reject(ctx, proposer, a.type, `decision policy ${policy} is not implemented in v0.1`, cause);
+  if (!a.options.includes(a.recommendation)) return r2.reject(ctx, proposer, a.type, "recommendation must be one of the options", cause);
+  const voters = r2.contacts(proposer, g.edges.filter((e) => e.from === proposer).map((e) => e.to)).slice(0, 4);
+  if (!voters.length) return r2.reject(ctx, proposer, a.type, "nobody you can reach to vote", cause);
+  const decisionId = newId("dec");
+  const evidence = taskArtifacts(r2, ctx, proposer).slice(-3);
+  const participants = [proposer, ...voters];
+  r2.emit1({ type: "DECISION_CREATED", actorId: proposer, payload: { decisionId, question: a.question, options: a.options, proposerId: proposer, recommendation: a.recommendation, evidence, policy, participants, taskId: ctx.taskId }, causedBy: cause });
+  const proposerReason = (ctx.reasoning[proposer] ?? []).slice(-1)[0] ?? "";
+  const predict = !!(f.trackRecord || f.decisionJournal);
+  let past = [];
+  if (f.decisionJournal) {
+    const me = r2.state.agents[proposer];
+    past = r2.memory.retrieve(a.question, proposer, me.teamId, g.policies.memoryRead, 2, { filter: (it) => tagsOf(it).includes("decision") }).items;
+    if (past.length) r2.emit1({ type: "MEMORY_RETRIEVED", actorId: proposer, payload: { agentId: proposer, query: truncate(`past decisions: ${a.question}`, 300), itemIds: past.map((m) => m.memoryId), latencyMs: 0, deniedItemIds: [] } });
+  }
+  const votes = /* @__PURE__ */ new Map();
+  const pb = ballotFor(r2, proposer, a.recommendation, evidence.length > 0);
+  votes.set(proposer, { ...pb, rationale: "proposer recommendation" });
+  r2.emit1({ type: "VOTE_CAST", actorId: proposer, payload: { decisionId, agentId: proposer, option: a.recommendation, rationale: "proposer recommendation", weight: pb.weight, ...f.debate ? { round: 1 } : {}, ...f.evidenceRule ? { evidence, evidenceWeight: pb.value } : {} } });
+  const votePrompt = (v, round, extra) => [
+    taskBrief(ctx.spec),
+    "",
+    `DECISION REQUESTED by ${proposer}: ${a.question}`,
+    `Options: ${a.options.map((o) => JSON.stringify(o)).join(", ")}`,
+    // 18: the first round is blind to the recommendation so votes are independent.
+    f.blindVote && round === 1 ? "Vote independently: the proposer\u2019s recommendation is not shown in this round." : `Proposer recommends ${JSON.stringify(a.recommendation)} because: ${proposerReason}`,
+    ...past.length ? ["Similar past decisions and how they turned out:", ...past.map((m) => `- ${truncate(m.content, 300)}`)] : [],
+    ...extra,
+    `Evidence you can cite (artifact ids you know): ${taskArtifacts(r2, ctx, v).join(", ") || "none"}.${f.evidenceRule ? " Votes that cite no evidence you can see count half." : ""}`,
+    `Vote for exactly one option (copy it verbatim) with a one-sentence rationale${predict ? ', your probability (0-1) that the task will pass if your option is chosen as "confidence"' : ""}, and the ids you rely on as "evidence".`,
+    `Reply JSON {"option": "...", "rationale": "..."${predict ? ', "confidence": 0.0' : ""}, "evidence": ["..."]}.`
+  ].join("\n");
+  let budgetLeft = true;
+  const castRound = async (round, extra) => {
+    for (const v of voters) {
+      if (!budgetLeft) return;
+      const j = await ask(r2, v, ctx, `vote on ${decisionId}${round > 1 ? ` (round ${round})` : ""}`, votePrompt(v, round, extra), VOTE_SCHEMA, 200);
+      if (j === "refused") {
+        budgetLeft = false;
+        return;
+      }
+      if (!j) continue;
+      const option = typeof j.option === "string" ? j.option : void 0;
+      if (!option || !a.options.includes(option)) {
+        r2.emit1({ type: "ACTION_REJECTED", actorId: "runtime", payload: { agentId: v, action: "vote", reason: `invalid option ${JSON.stringify(j.option)} \u2014 abstention recorded`, taskId: ctx.taskId } });
+        continue;
+      }
+      const ev = citedEvidence(r2, v, j.evidence);
+      const b = ballotFor(r2, v, option, ev.valid);
+      const confidence = predict && typeof j.confidence === "number" ? clamp01(j.confidence) : void 0;
+      const previous = votes.get(v)?.option;
+      const rationale = truncate(typeof j.rationale === "string" ? j.rationale : "", 1e3);
+      votes.set(v, { ...b, rationale, ...confidence !== void 0 ? { confidence } : {} });
+      r2.emit1({
+        type: "VOTE_CAST",
+        actorId: v,
+        payload: {
+          decisionId,
+          agentId: v,
+          option,
+          rationale,
+          weight: b.weight,
+          ...f.debate ? { round } : {},
+          ...round > 1 && previous !== void 0 ? { previousOption: previous } : {},
+          ...f.blindVote && round === 1 ? { blind: true } : {},
+          ...confidence !== void 0 ? { confidence } : {},
+          ...f.evidenceRule ? { evidence: ev.ids, evidenceWeight: b.value } : {}
+        }
+      });
+    }
+  };
+  await castRound(1, []);
+  let rounds = 1;
+  if (f.debate && budgetLeft && new Set([...votes.values()].map((b) => b.option)).size > 1) {
+    const first = resolveDecision(policy, a.options, [...votes.values()], a.recommendation);
+    const leader = first.chosen;
+    const dissent = [...votes.values()].filter((b) => b.option !== leader);
+    const critic = (dissent.find((b) => b.canReview) ?? dissent[0])?.agentId;
+    const supporter = votes.get(proposer)?.option === leader ? proposer : [...votes.values()].find((b) => b.option === leader && b.agentId !== critic)?.agentId;
+    if (critic) {
+      const tally = Object.entries(first.tally).map(([o, n]) => `${o}: ${Number(n.toFixed(2))}`).join(", ");
+      const against = await argue(r2, ctx, decisionId, a.question, critic, 1, "against", leader, [`The team leans to ${JSON.stringify(leader)} (${tally}); you voted ${JSON.stringify(votes.get(critic).option)}.`]);
+      if (against) {
+        const rebuttal = supporter ? await argue(r2, ctx, decisionId, a.question, supporter, 1, "rebuttal", leader, [`${critic} argues against it: ${against}`]) : null;
+        rounds = 2;
+        await castRound(2, ["DEBATE after the first vote:", `- Leading option ${JSON.stringify(leader)} (${tally})`, `- ${critic} against it: ${against}`, ...rebuttal ? [`- ${supporter} in reply: ${rebuttal}`] : [], "Vote again; you may change your vote."]);
+      }
+    }
+  }
+  const ballots = [...votes.values()];
+  let res = resolveDecision(policy, a.options, ballots, a.recommendation);
+  let tieBreakBy;
+  if (f.tieBreak && (policy === "MAJORITY" || policy === "WEIGHTED_VOTE")) {
+    const vals = Object.values(res.tally).sort((x2, y) => y - x2);
+    const total = vals.reduce((p, c) => p + c, 0);
+    if (vals.length > 1 && vals[0] === vals[1] || total > 0 && vals[0] / total <= 0.5) {
+      const decider = participants.find((p) => capabilitiesOf(g, p).includes("decide")) ?? (participants.includes(g.entryAgentId) ? g.entryAgentId : proposer);
+      const chosen = votes.get(decider)?.option ?? a.recommendation;
+      tieBreakBy = decider;
+      res = { ...res, chosen, confidence: Math.min(res.confidence, 0.5), rationale: `no majority after ${rounds} round(s); settled by ${decider} (decision authority)`, opposition: ballots.filter((b) => b.option !== chosen).map((b) => b.agentId) };
+    }
+  }
+  const backing = ballots.filter((b) => b.option === res.chosen && b.confidence !== void 0);
+  const w = backing.reduce((p, b) => p + (b.value ?? 1), 0);
+  const predictedSuccess = backing.length && w > 0 ? backing.reduce((p, b) => p + b.confidence * (b.value ?? 1), 0) / w : void 0;
+  const minority = ballots.filter((b) => b.option !== res.chosen).map((b) => `${b.agentId} (${b.option}): ${b.rationale}`);
+  r2.emit1({
+    type: "DECISION_COMPLETED",
+    actorId: "runtime",
+    payload: {
+      decisionId,
+      chosen: res.chosen,
+      confidence: Math.max(0, Math.min(1, res.confidence)),
+      policy,
+      tally: res.tally,
+      rationale: res.rationale,
+      opposition: res.opposition,
+      ...f.debate ? { rounds } : {},
+      ...predictedSuccess !== void 0 ? { predictedSuccess } : {},
+      ...f.blindVote && minority.length ? { minorityReport: truncate(minority.join(" | "), 2e3) } : {},
+      ...tieBreakBy ? { tieBreakBy } : {}
+    }
+  });
+  const fb = [`Decision ${decisionId} resolved by ${policy}${rounds > 1 ? ` after ${rounds} rounds` : ""}: ${res.chosen} (${res.rationale}).`];
+  if (minority.length && f.blindVote) fb.push(`Minority view: ${truncate(minority.join(" | "), 600)}`);
+  if (past.length) fb.push(`Similar past decisions: ${past.map((m) => truncate(m.content, 200)).join(" | ")}`);
+  (ctx.pendingFeedback[proposer] ??= []).push(...fb);
+  if (f.preMortem && budgetLeft) {
+    const critic = voters.find((v) => capabilitiesOf(g, v).includes("review")) ?? voters[0];
+    const pm = await argue(r2, ctx, decisionId, a.question, critic, rounds, "premortem", res.chosen, []);
+    if (pm) (ctx.pendingFeedback[proposer] ??= []).push(`Pre-mortem by ${critic}: ${pm}`);
+  }
+}
+
+// packages/runtime/src/runner.ts
+var RunStopped = class extends Error {
 };
 var DEFAULT_RETRY = { maxAttempts: 10, baseDelayMs: 2e3, maxDelayMs: 6e4 };
 function backoffMs(policy, failedAttempt, retryAfterMs2) {
@@ -36507,7 +37126,8 @@ var OrgRunner = class {
     }
   }
   /* ------------------------------------------------------------------ cognition */
-  async think(agentId, taskId, ledger, purpose, system, prompt, schema, causedBy, category = this.category) {
+  /** One model call with budget checks, events and retries. Internal; also used by organization.ts. */
+  async think(agentId, taskId, ledger, purpose, system, prompt, schema, causedBy, category = this.category, opts = {}) {
     for (const [scope, l] of [["task", ledger], ["run", this.runLedger]]) {
       if (!l) continue;
       const c = l.canStartCall();
@@ -36522,7 +37142,7 @@ var OrgRunner = class {
       const callId = newId("call");
       this.emit1({ type: "MODEL_CALL_STARTED", actorId: agentId ?? "runtime", payload: { callId, agentId, taskId, category, purpose: truncate(purpose, 120), provider: this.provider.id, model }, causedBy });
       try {
-        const result = await this.provider.complete({ system, prompt, jsonSchema: schema, model, maxOutputTokens: this.config.model.maxOutputTokensPerCall, ...this.config.model.temperature !== void 0 ? { temperature: this.config.model.temperature } : {}, purpose });
+        const result = await this.provider.complete({ system, prompt, jsonSchema: schema, model, maxOutputTokens: Math.min(opts.maxOutputTokens ?? Infinity, this.config.model.maxOutputTokensPerCall), ...this.config.model.temperature !== void 0 ? { temperature: this.config.model.temperature } : {}, purpose });
         ledger?.record(result.usage, result.costUsd);
         this.runLedger.record(result.usage, result.costUsd);
         const [done] = this.emit([
@@ -36568,7 +37188,9 @@ var OrgRunner = class {
       pendingFeedback: {},
       pendingMemories: {},
       structuralChangesBefore: this.pendingStructuralChanges,
-      stalls: 0
+      stalls: 0,
+      learningIds: [],
+      plan: null
     };
     this.pendingStructuralChanges = 0;
     const bench = spec.kind === "bench" ? spec.task : null;
@@ -36592,6 +37214,8 @@ var OrgRunner = class {
       { type: "TASK_STARTED", actorId: "runtime", payload: { taskId } }
     ]);
     if (this.config.features.crossTaskMemory && this.memory.size > 0) this.recall(ctx, g.entryAgentId, taskBrief(spec).slice(0, 400), "task-start");
+    taskStartLearning(this, ctx);
+    await planPaths(this, ctx);
     let stopReason = "max-turns";
     try {
       while (!ctx.submitted && ctx.turns < this.genome.policies.maxTurnsPerTask) {
@@ -36864,6 +37488,7 @@ ${truncate(r2.output, 2500)}`);
     return [...new Set(requested)].filter((p) => p !== agentId && hasEdge(this.genome, agentId, p) && !this.state.agents[p]?.removed);
   }
   async runDecision(ctx, agentId, a, cause) {
+    if (usesDeliberation(this.config)) return deliberate(this, ctx, agentId, a, cause);
     const g = this.genome;
     const policy = g.policies.decision;
     if (!IMPLEMENTED_POLICIES.has(policy)) return this.reject(ctx, agentId, a.type, `decision policy ${policy} is not implemented in v0.1`, cause);
@@ -36991,7 +37616,8 @@ ${transcript.join("\n")}`);
     if (stopReason === "stopped" || stopReason === "entry-failed" || !artifactId && stopReason !== "submitted")
       drafts.push({ type: "TASK_FAILED", actorId: "runtime", payload: { taskId: ctx.taskId, reason: artifactId ? stopReason : `${stopReason}: no deliverable produced`, score } });
     else drafts.push({ type: "TASK_COMPLETED", actorId: "runtime", payload: { taskId: ctx.taskId, success: success2, score, submittedArtifactId: artifactId, submittedBy: ctx.submitted?.by ?? null, forced } });
-    this.emit(drafts);
+    const outcomeEvents = this.emit(drafts);
+    await afterTaskLearning(this, ctx, { success: success2, score, stopReason, outcomeEventId: outcomeEvents[outcomeEvents.length - 1].eventId, artifactId });
     this.log(`task ${bench?.id ?? t.title}: ${success2 ? "SUCCESS" : "FAIL"} score=${score.toFixed(2)} turns=${ctx.turns} stop=${stopReason}`);
     return {
       taskId: ctx.taskId,
@@ -37216,6 +37842,27 @@ function communication(s, tasks) {
     meetings: Object.keys(s.meetings).length
   };
 }
+function orgLearning(s) {
+  const k = knowledgeView(s);
+  const d = deliberationView(s);
+  const scored = Object.values(s.learning?.lessons ?? {});
+  const preds = s.learning?.predictions ?? [];
+  return {
+    lessons: k.items.filter((i2) => i2.type === "lesson").length,
+    lessonsRetired: scored.filter((l) => l.retired).length,
+    meanLessonUtility: scored.length ? scored.reduce((a, l) => a + l.utility, 0) / scored.length : null,
+    playbookEntries: k.items.filter((i2) => i2.type === "playbook").length,
+    reflections: k.reflections.length,
+    debatedDecisions: d.decisions.filter((x2) => x2.rounds.length > 1).length,
+    mindChanges: d.decisions.reduce((a, x2) => a + x2.mindChanges.length, 0),
+    preMortems: d.decisions.reduce((a, x2) => a + x2.arguments.filter((g) => g.stance === "premortem").length, 0),
+    tieBreaks: d.decisions.filter((x2) => x2.tieBreakBy).length,
+    predictions: preds.length,
+    brier: preds.length ? preds.reduce((a, p) => a + p.brier, 0) / preds.length : null,
+    contributionChecks: s.learning?.contributions.length ?? 0,
+    counterfactuals: s.learning?.counterfactuals.length ?? 0
+  };
+}
 function runMetrics(events, opts = {}) {
   const s = reduceEvents(events);
   const r2 = taskRecords(s);
@@ -37249,7 +37896,8 @@ function runMetrics(events, opts = {}) {
     contaminated: s.contaminated,
     successByCategory: successByCategory(r2),
     verification: verificationCoverage(events, r2),
-    audit: mutationAudit(s)
+    audit: mutationAudit(s),
+    learning: orgLearning(s)
   };
 }
 
@@ -37441,8 +38089,6 @@ var EvolutionController = class {
   constructor(o) {
     this.o = o;
     this.rng = new Rng(o.seed);
-    if (o.config.enabled && (o.config.proposer === "llm" || o.config.proposer === "both"))
-      throw new Error(`evolution proposer "${o.config.proposer}" is not implemented in v0.1 (conflict C-20); use "heuristic" or "random"`);
   }
   o;
   rng;
@@ -37468,7 +38114,32 @@ var EvolutionController = class {
     const d = diagnose(r2, history.slice(-windowSize));
     r2.emit1({ type: "DIAGNOSIS_RECORDED", actorId: "controller", payload: { diagnosis: d } });
     const random = c.proposer === "random";
-    const proposals = (random ? [randomProposal(r2.genome, this.rng, this.vocab)] : heuristicProposals(r2.genome, d)).slice(0, c.maxProposalsPerTrigger);
+    const shared = !!(c.contributionCheck || c.counterfactualReview);
+    const sharedBuffer = shared ? this.buffer(history) : null;
+    const cache = /* @__PURE__ */ new Map();
+    const run = async (genome, tasks, tag) => {
+      if (!shared) return this.evaluate(genome, tasks, tag);
+      const key = `${structure(genome)}|${tasks.map(taskIdOf).join(",")}`;
+      const hit = cache.get(key);
+      if (hit) return hit;
+      const e = await this.evaluate(genome, tasks, tag);
+      cache.set(key, e);
+      return e;
+    };
+    const charged = /* @__PURE__ */ new Set();
+    const bill = (...evals) => {
+      const fresh = evals.filter((e) => e.runIds.some((id2) => !charged.has(id2)));
+      for (const e of fresh) for (const id2 of e.runIds) charged.add(id2);
+      return { runIds: fresh.flatMap((e) => e.runIds), cost: { tokens: sum(fresh, "tokens"), calls: sum(fresh, "calls"), usd: sum(fresh, "usd") } };
+    };
+    const first = [];
+    if (c.contributionCheck) {
+      const p = await this.contribution(d, sharedBuffer, run, bill);
+      if (p) first.push(p);
+    }
+    const base = random ? [randomProposal(r2.genome, this.rng, this.vocab)] : c.proposer === "llm" ? await this.llmProposals(d) : c.proposer === "both" ? [...heuristicProposals(r2.genome, d), ...await this.llmProposals(d)] : heuristicProposals(r2.genome, d);
+    const seen = /* @__PURE__ */ new Set();
+    const proposals = [...first, ...base].filter((p) => !seen.has(JSON.stringify(p.mutation)) && !!seen.add(JSON.stringify(p.mutation))).slice(0, c.maxProposalsPerTrigger);
     for (const p of proposals) {
       r2.emit1({ type: "MUTATION_PROPOSED", actorId: "controller", payload: { proposal: p } });
       const blocked = isMutationAllowed(p.mutation, c.mutationSet, ablations);
@@ -37488,9 +38159,24 @@ var EvolutionController = class {
       if (skipValidation) {
         r2.emit1({ type: "MUTATION_VALIDATED", actorId: "controller", payload: { proposalId: p.id, method: "skipped-ablation", incumbentScore: null, candidateScore: null, margin: c.delta, bufferTaskIds: [], accepted: true, shadowRunIds: [], cost: { tokens: 0, calls: 0, usd: 0 } } });
       } else {
-        const buffer = this.buffer(history);
-        const inc = await this.evaluate(r2.genome, buffer, "inc");
-        const cand = await this.evaluate(candidate, buffer, "cand");
+        if (c.counterfactualReview) {
+          const failed = history.slice(-c.trigger.everyK).filter((h) => h.spec.kind === "bench" && !h.outcome.success).slice(-3);
+          if (failed.length) {
+            const observed = fitnessOf(failed.map((h) => h.outcome), this.o.config.fitnessCostPer1kTokens);
+            const alt = await run(candidate, failed, "cf");
+            const billed2 = bill(alt);
+            const better = alt.fitness > observed;
+            r2.emit1({ type: "COUNTERFACTUAL_EVALUATED", actorId: "controller", payload: { proposalId: p.id, taskIds: failed.map(taskIdOf), incumbentScore: observed, alternativeScore: alt.fitness, better, shadowRunIds: billed2.runIds, cost: billed2.cost } });
+            if (!better) {
+              r2.emit1({ type: "MUTATION_REJECTED", actorId: "controller", payload: { proposalId: p.id, reason: `counterfactual: no better on the ${failed.length} recently failed task(s) (${alt.fitness.toFixed(3)} vs ${observed.toFixed(3)} observed)` } });
+              continue;
+            }
+          }
+        }
+        const buffer = sharedBuffer ?? this.buffer(history);
+        const inc = await run(r2.genome, buffer, "inc");
+        const cand = await run(candidate, buffer, "cand");
+        const billed = bill(inc, cand);
         accepted = cand.fitness > inc.fitness + c.delta;
         r2.emit1({
           type: "MUTATION_VALIDATED",
@@ -37503,8 +38189,8 @@ var EvolutionController = class {
             margin: c.delta,
             bufferTaskIds: buffer.map((b) => b.spec.kind === "bench" ? b.spec.task.id : b.outcome.taskId),
             accepted,
-            shadowRunIds: [...inc.runIds, ...cand.runIds],
-            cost: { tokens: inc.tokens + cand.tokens, calls: inc.calls + cand.calls, usd: inc.usd + cand.usd }
+            shadowRunIds: billed.runIds,
+            cost: billed.cost
           }
         });
         if (!accepted) r2.emit1({ type: "MUTATION_REJECTED", actorId: "controller", payload: { proposalId: p.id, reason: `candidate ${cand.fitness.toFixed(3)} \u2264 incumbent ${inc.fitness.toFixed(3)} + \u03B4 ${c.delta}` } });
@@ -37543,6 +38229,58 @@ var EvolutionController = class {
     for (let i2 = 0; i2 < this.o.config.bufferHistorical && older.length; i2++) hist.push(older.splice(this.rng.int(older.length), 1)[0]);
     return [...recent, ...hist];
   }
+  contributionRound = 0;
+  /** Idea 25: replay the buffer without one agent (rotating) and record what it adds; a non-contributor becomes a proposal. */
+  async contribution(d, buffer, run, bill) {
+    const r2 = this.o.runner;
+    const g = r2.genome;
+    const others = g.agents.map((a) => a.id).filter((id2) => id2 !== g.entryAgentId).sort();
+    if (!others.length || !buffer.length) return null;
+    const agentId = others[this.contributionRound++ % others.length];
+    let without;
+    try {
+      without = applyMutation(g, { type: "REMOVE_AGENT", agentId }, { createdBy: "contribution-check" });
+    } catch {
+      return null;
+    }
+    const inc = await run(g, buffer, "inc");
+    const out2 = await run(without, buffer, "minus");
+    const billed = bill(inc, out2);
+    const delta = inc.fitness - out2.fitness;
+    r2.emit1({ type: "CONTRIBUTION_MEASURED", actorId: "controller", payload: { agentId, taskIds: buffer.map(taskIdOf), withScore: inc.fitness, withoutScore: out2.fitness, delta, shadowRunIds: billed.runIds, cost: billed.cost } });
+    if (delta > 0 || d.idleAgents.includes(agentId)) return null;
+    return propose({ type: "REMOVE_AGENT", agentId }, { contributionDelta: delta, withScore: inc.fitness, withoutScore: out2.fitness, tasks: buffer.length }, `Without ${agentId} the organization scored ${out2.fitness.toFixed(3)} vs ${inc.fitness.toFixed(3)} on ${buffer.length} replayed tasks: it does not contribute.`, "heuristic", { costDelta: -0.1 });
+  }
+  /** Idea 26: the organization proposes its own structural change from the evidence (labelled proposer "llm"). */
+  async llmProposals(d) {
+    const r2 = this.o.runner;
+    const g = r2.genome;
+    const vocab = this.vocab ?? roleVocabulary(g);
+    const lessons = r2.memory.all().filter((m2) => (m2.tags ?? []).includes("lesson")).slice(-3).map((m2) => `- ${truncate(m2.content, 200)}`);
+    const system = "You redesign an AI software organization. Propose at most ONE structural change that the evidence supports, or NONE. Every change is replayed on past tasks and adopted only if it scores better than the current organization.";
+    const prompt = [
+      `Organization (generation ${g.generation}); entry agent ${g.entryAgentId}.`,
+      `Agents: ${g.agents.map((a) => `${a.id} (${a.roleId})`).join(", ")}`,
+      `Edges: ${g.edges.map((e) => `${e.from}->${e.to}`).join(", ") || "none"}`,
+      `Roles you may use: ${vocab.map((v) => v.id).join(", ")}`,
+      `Evidence from the last ${d.window} tasks: success ${(d.successRate * 100).toFixed(0)}%; failures by category ${JSON.stringify(d.failuresByCategory)} of ${JSON.stringify(d.tasksByCategory)}; idle agents: ${d.idleAgents.join(", ") || "none"}; unused edges: ${d.unusedEdges.slice(0, 5).join(", ") || "none"}; mean tokens per task ${Math.round(d.meanTokens)}.`,
+      ...lessons.length ? ["Lessons the organization has recorded:", ...lessons] : [],
+      'Reply JSON {"type": "ADD_AGENT|REMOVE_AGENT|CHANGE_ROLE|ADD_EDGE|REMOVE_EDGE|NONE", "agentId": "...", "roleId": "...", "from": "...", "to": "...", "hypothesis": "what will improve and why, citing the evidence"}.'
+    ].join("\n");
+    const j = await r2.controllerCall("llm proposer", system, prompt, LLM_PROPOSAL_SCHEMA);
+    if (!j || j.type === "NONE") return [];
+    const str2 = (k) => typeof j[k] === "string" ? j[k] : "";
+    const role = vocab.find((v) => v.id === str2("roleId"));
+    const raw = j.type === "ADD_AGENT" && role ? { type: "ADD_AGENT", agent: { id: `${role.id}_g${g.generation + 1}`, name: role.name, roleId: role.id }, role } : j.type === "REMOVE_AGENT" ? { type: "REMOVE_AGENT", agentId: str2("agentId") } : j.type === "CHANGE_ROLE" && role ? { type: "CHANGE_ROLE", agentId: str2("agentId"), role } : j.type === "ADD_EDGE" ? { type: "ADD_EDGE", edge: { from: str2("from"), to: str2("to"), kind: "delegate" } } : j.type === "REMOVE_EDGE" ? { type: "REMOVE_EDGE", from: str2("from"), to: str2("to") } : null;
+    const m = raw ? Mutation.safeParse(raw) : null;
+    if (!m?.success) {
+      r2.emit1({ type: "ANOMALY_DETECTED", actorId: "controller", payload: { kind: "llm-proposal-unusable", detail: truncate(JSON.stringify(j), 400) } });
+      return [];
+    }
+    const hypothesis = truncate(str2("hypothesis") || "no hypothesis given", 400);
+    const worst = Object.entries(d.failuresByCategory).sort((a, b) => b[1] - a[1])[0];
+    return [propose(m.data, { window: d.window, successRate: d.successRate, ...worst ? { worstCategory: worst[0], failuresInWindow: worst[1] } : {}, idleAgents: d.idleAgents.join(",") }, hypothesis, "llm")];
+  }
   async evaluate(genome, buffer, tag) {
     const parent = this.o.runner;
     const runId = `${parent.runId}-val${++this.shadowCount}-${tag}`;
@@ -37563,6 +38301,22 @@ var EvolutionController = class {
     const n = Math.max(1, buffer.length);
     return { fitness: score / n - this.o.config.fitnessCostPer1kTokens * tokens2 / n / 1e3, tokens: s.tokens, calls: s.calls, usd: s.usd, runIds: [runId] };
   }
+};
+var taskIdOf = (h) => h.spec.kind === "bench" ? h.spec.task.id : h.outcome.taskId;
+var sum = (es, k) => es.reduce((a, e) => a + e[k], 0);
+var fitnessOf = (outs, costPer1k) => outs.length ? outs.reduce((a, o) => a + o.score, 0) / outs.length - costPer1k * outs.reduce((a, o) => a + o.tokens, 0) / outs.length / 1e3 : 0;
+var structure = (g) => JSON.stringify([g.entryAgentId, g.agents.map((a) => [a.id, a.roleId]).sort(), g.edges.map((e) => [e.from, e.to, e.kind]).sort(), g.roles.map((x2) => x2.id).sort(), g.policies]);
+var LLM_PROPOSAL_SCHEMA = {
+  type: "object",
+  properties: {
+    type: { type: "string", enum: ["ADD_AGENT", "REMOVE_AGENT", "CHANGE_ROLE", "ADD_EDGE", "REMOVE_EDGE", "NONE"] },
+    agentId: { type: "string" },
+    roleId: { type: "string" },
+    from: { type: "string" },
+    to: { type: "string" },
+    hypothesis: { type: "string" }
+  },
+  required: ["type", "hypothesis"]
 };
 
 // packages/evoorg/src/designer.ts
@@ -37919,7 +38673,7 @@ function readSlots(store, config2, id2) {
   return { cfg, configHash, experimentId, slots, runsBy };
 }
 function resultsCsv(r2) {
-  const head = ["experiment_id", "condition_id", "condition", "run_id", "provider", "scripted", "tasks", "successes", "success_rate", "cumulative_reward", "lifetime_tokens", "lifetime_usd", "validation_tokens", "messages_per_task", "generation", "mutations_accepted", "mutations_rejected", "churn_per100", "first_half_life", "contaminated", "reviewer_coverage", "reviewer_coverage_by_phase", "first_uncovered_task", "security_success_rate", "audit_complete"];
+  const head = ["experiment_id", "condition_id", "condition", "run_id", "provider", "scripted", "tasks", "successes", "success_rate", "cumulative_reward", "lifetime_tokens", "lifetime_usd", "validation_tokens", "messages_per_task", "generation", "mutations_accepted", "mutations_rejected", "churn_per100", "first_half_life", "contaminated", "reviewer_coverage", "reviewer_coverage_by_phase", "first_uncovered_task", "security_success_rate", "audit_complete", "lessons", "lessons_retired", "mean_lesson_utility", "debated_decisions", "mind_changes", "predictions", "prediction_brier", "contribution_checks", "counterfactuals"];
   const rows = r2.conditions.flatMap(
     (c) => c.metrics.map((m, i2) => [
       r2.experimentId,
@@ -37946,7 +38700,16 @@ function resultsCsv(r2) {
       Object.entries(m.verification.byPhase).map(([p, b]) => `${p}:${b.rate.toFixed(4)}`).join(" "),
       m.verification.firstUncoveredIndex ?? "",
       m.successByCategory.security ? m.successByCategory.security.rate.toFixed(4) : "",
-      m.audit.complete
+      m.audit.complete,
+      m.learning.lessons,
+      m.learning.lessonsRetired,
+      m.learning.meanLessonUtility === null ? "" : m.learning.meanLessonUtility.toFixed(4),
+      m.learning.debatedDecisions,
+      m.learning.mindChanges,
+      m.learning.predictions,
+      m.learning.brier === null ? "" : m.learning.brier.toFixed(4),
+      m.learning.contributionChecks,
+      m.learning.counterfactuals
     ])
   );
   return [head, ...rows].map((r22) => r22.map((v) => typeof v === "string" && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : String(v)).join(",")).join("\n") + "\n";

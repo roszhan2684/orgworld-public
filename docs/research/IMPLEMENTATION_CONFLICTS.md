@@ -103,3 +103,18 @@ Required by `ORGWORLD_BUILD.md` §0. Rule: where the research document and the b
 - **Resolution 1:** temperature is sent only when configured, and results are labelled `samplingControlled` only then. Claude runs are therefore not sampling-controlled (cf. C-07). Pre-registered Claude experiments use Claude Haiku 5.5, which still accepts the forced tool call. **OPEN:** moving the provider to structured outputs (`output_config.format`) is required before Sonnet 5.5 / Opus 5.5 runs. That change needs one paid smoke test, so it waits for the researcher's approval.
 - **Conflict 2:** `evolution.proposer` accepted `llm` and `both`, but no LLM proposer exists; the controller silently ran the heuristic.
 - **Resolution 2:** `llm`/`both` are refused with an explicit error. No existing config used them.
+- **Update (2026-11-06, see C-21):** an LLM proposer now exists (`proposer: llm | both`). It makes one controller call per trigger, its proposals are labelled `llm`, and each one goes through the same validity checks and paired re-execution as the heuristic's. Unusable replies are recorded as anomalies and nothing is applied. The pre-registered pilot and safety configs still use `heuristic`.
+
+### C-21 — Organization-behaviour extensions beyond the research design (2026-11-06)
+- **Conflict:** the researcher asked for a fuller organization. Its members should learn from mistakes and successes, argue for decisions and change each other's minds, question outcomes, predict before acting, and know who is good at what. The research design specifies persistent *structural* learning; these member-level behaviours are not part of it, and adding them changes what "EvoOrg" means.
+- **Resolution:** implemented as separate, opt-in behaviours. Each is an optional flag that is off unless set, and absent flags keep every existing config's parsed form and hash unchanged.
+  - **Learning:** `afterActionReview`, `playbook`, `lessonScoring`, `decisionJournal`.
+  - **Deliberation:** `debate`, `evidenceRule`, `blindVote`, `tieBreak`, `preMortem`.
+  - **Prediction:** `multiPath`, `trackRecord`, `expertiseDirectory`.
+  - **Evolution:** `evolution.counterfactualReview`, `evolution.contributionCheck`, and the LLM proposer (C-20 update).
+- **Rules every extension keeps:**
+  - each model call is a real call by a named agent, charged to the task budget, and each result is an event;
+  - hidden-test content never enters a prompt (reviews see only the score);
+  - lessons stay inside a run, so repetitions remain independent;
+  - shadow re-executions are charged to the parent run once.
+- **Validity effect:** the frozen pre-registered experiments (pilot, feasibility, safety, Claude replication) run none of this. Its effect is to be tested by its own experiment, `experiments/organization/` (draft pre-registration, matched per-task budget, one condition per feature group). Until that runs, no claim is made that any extension helps.

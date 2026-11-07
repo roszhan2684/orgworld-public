@@ -6,6 +6,8 @@ export interface Ballot {
   weight: number;
   isEntry: boolean;
   canReview: boolean;
+  /** Tally value under non-weighted policies (default 1). The evidence rule and track record lower or raise it (C-21). */
+  value?: number;
 }
 
 export interface Resolution {
@@ -22,7 +24,7 @@ export const IMPLEMENTED_POLICIES: ReadonlySet<DecisionPolicy> = new Set(['DIREC
 export function resolveDecision(policy: DecisionPolicy, options: string[], ballots: Ballot[], recommendation: string): Resolution {
   if (!IMPLEMENTED_POLICIES.has(policy)) throw new Error(`decision policy ${policy} is not implemented in v0.1`);
   const tally: Record<string, number> = Object.fromEntries(options.map((o) => [o, 0]));
-  for (const b of ballots) tally[b.option] = (tally[b.option] ?? 0) + (policy === 'WEIGHTED_VOTE' ? b.weight : 1);
+  for (const b of ballots) tally[b.option] = (tally[b.option] ?? 0) + (policy === 'WEIGHTED_VOTE' ? b.weight : (b.value ?? 1));
   const total = Object.values(tally).reduce((a, b) => a + b, 0);
   const ranked = Object.entries(tally).sort((a, b) => b[1] - a[1] || (a[0] === recommendation ? -1 : b[0] === recommendation ? 1 : 0));
   const top = ranked[0]?.[0] ?? recommendation;

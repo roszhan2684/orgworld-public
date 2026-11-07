@@ -223,6 +223,24 @@ export interface CostBucket {
   usd: number;
 }
 
+/** Learning, deliberation and organization-check records (conflict C-21). Created on the first such event, so runs
+ *  without those features reduce to exactly the state they always did. */
+export interface LearningState {
+  reflections: Array<PayloadOf<'REFLECTION_RECORDED'> & { seq: number }>;
+  /** Latest evaluation per lesson memory id. */
+  lessons: Record<string, PayloadOf<'LESSON_EVALUATED'> & { seq: number }>;
+  decisionReviews: Array<PayloadOf<'DECISION_REVIEWED'> & { seq: number }>;
+  arguments: Array<PayloadOf<'ARGUMENT_MADE'> & { seq: number }>;
+  plans: Array<PayloadOf<'PLANS_PROPOSED'> & { seq: number }>;
+  predictions: Array<PayloadOf<'PREDICTION_SCORED'> & { seq: number }>;
+  counterfactuals: Array<PayloadOf<'COUNTERFACTUAL_EVALUATED'> & { seq: number }>;
+  contributions: Array<PayloadOf<'CONTRIBUTION_MEASURED'> & { seq: number }>;
+}
+
+export function emptyLearning(): LearningState {
+  return { reflections: [], lessons: {}, decisionReviews: [], arguments: [], plans: [], predictions: [], counterfactuals: [], contributions: [] };
+}
+
 export interface WorldState {
   runId: string | null;
   config: RunConfig | null;
@@ -261,6 +279,7 @@ export interface WorldState {
   contaminated: boolean;
   toolInvocations: number;
   timeline: TimelineEntry[];
+  learning?: LearningState;
 }
 
 const emptyBucket = (): CostBucket => ({ calls: 0, tokens: 0, inputTokens: 0, outputTokens: 0, usd: 0 });
@@ -857,12 +876,72 @@ export function applyEvent(s: WorldState, e: OrgEvent): WorldState {
       s.contaminated = true;
       tl(`Contamination: ${e.payload.action} (${e.payload.source})`);
       break;
+    case 'REFLECTION_RECORDED': {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).reflections.push({ ...p, seq });
+      setActivity(p.agentId, 'working', `reviewing why the task ${p.success ? 'passed' : 'failed'}`, 'library');
+      tl(`${p.agentId} reviewed the task (${p.success ? 'passed' : 'failed'}): ${p.lesson}`, p.memoryId);
+      break;
+    }
+    case 'LESSON_EVALUATED': {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).lessons[p.memoryId] = { ...p, seq };
+      if (p.retired) tl(`Lesson ${p.memoryId} retired: helped ${p.wins}/${p.uses} tasks (baseline ${(p.baseline * 100).toFixed(0)}%)`, p.memoryId);
+      break;
+    }
+    case 'DECISION_REVIEWED': {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).decisionReviews.push({ ...p, seq });
+      tl(`Decision ${p.decisionId} reviewed: chose ${p.chosen}, task ${p.taskSuccess ? 'passed' : 'failed'}${p.predictedSuccess === null ? '' : ` (predicted ${(p.predictedSuccess * 100).toFixed(0)}%)`}`, p.decisionId);
+      break;
+    }
+    case 'ARGUMENT_MADE': {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).arguments.push({ ...p, seq });
+      setActivity(p.agentId, 'working', `${p.stance === 'premortem' ? 'pre-mortem on' : p.stance === 'against' ? 'arguing against' : 'defending'} ${p.option}`, 'decision');
+      tl(`${p.agentId} ${p.stance === 'premortem' ? 'pre-mortem' : p.stance === 'against' ? 'argues against' : 'rebuts for'} "${p.option}": ${p.content}`, p.decisionId);
+      break;
+    }
+    case 'PLANS_PROPOSED': {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).plans.push({ ...p, seq });
+      const best = p.plans.find((x) => x.planId === p.chosenPlanId);
+      setActivity(p.agentId, 'thinking', `weighing ${p.plans.length} plans`, 'decision');
+      tl(`${p.agentId} weighed ${p.plans.length} plans; chose ${p.chosenPlanId}${best ? ` (predicted ${(best.predictedSuccess * 100).toFixed(0)}%)` : ''}`, p.taskId);
+      break;
+    }
+    case 'PREDICTION_SCORED':
+      (s.learning ??= emptyLearning()).predictions.push({ ...e.payload, seq });
+      break;
+    case 'COUNTERFACTUAL_EVALUATED': {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).counterfactuals.push({ ...p, seq });
+      chargeShadow(s, p.cost);
+      tl(`Counterfactual for ${p.proposalId}: ${p.alternativeScore.toFixed(2)} vs current ${p.incumbentScore.toFixed(2)} on ${p.taskIds.length} failed task(s)`, p.proposalId);
+      break;
+    }
+    case 'CONTRIBUTION_MEASURED': {
+      const p = e.payload;
+      (s.learning ??= emptyLearning()).contributions.push({ ...p, seq });
+      chargeShadow(s, p.cost);
+      tl(`Contribution of ${p.agentId}: ${p.delta >= 0 ? '+' : ''}${p.delta.toFixed(2)} (with ${p.withScore.toFixed(2)}, without ${p.withoutScore.toFixed(2)})`, p.agentId);
+      break;
+    }
     default: {
       const never: never = e;
       throw new ReducerError(`unhandled event type ${(never as OrgEvent).type}`);
     }
   }
   return s;
+}
+
+/** Shadow re-execution cost counts toward this (parent) run's lifetime cost, as validation (III Control 4). */
+function chargeShadow(s: WorldState, cost: { tokens: number; calls: number; usd: number }): void {
+  for (const b of [s.costs.total, s.costs.byCategory.validation]) {
+    b.calls += cost.calls;
+    b.tokens += cost.tokens;
+    b.usd += cost.usd;
+  }
 }
 
 function fmt(n: number | null): string {
