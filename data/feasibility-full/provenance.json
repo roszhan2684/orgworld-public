@@ -1,0 +1,13 @@
+{
+  "bundleSha256": "b4ae6d1c55c5456dd906bd9d1519d698fbbb244f4d49e7ffc73c626d490026b1",
+  "commit": "13f51cbffedaa72c333a51d37f4336a40e862045",
+  "model": "qwen2.5-coder:7b",
+  "modelDigest": "dae161e27b0e90dd1856c8bb3209201fd6736d8eb66298e75ed87571486f4364",
+  "ollamaVersion": "0.40.15",
+  "contextLength": "4096",
+  "nodeVersion": "v22.14.0",
+  "macos": "26.6.2",
+  "machine": "Mac16,8, Apple M4 Pro, 24 GB",
+  "firstSession": "2026-11-07",
+  "history": []
+}

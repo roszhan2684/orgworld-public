@@ -1,0 +1,262 @@
+{
+  "experimentId": "exp_42405c021b81",
+  "name": "feasibility-full",
+  "configHash": "42405c021b81a811adff0c91",
+  "model": {
+    "provider": "ollama",
+    "model": "qwen2.5-coder:7b",
+    "temperature": 0,
+    "seed": 7,
+    "maxOutputTokensPerCall": 2048,
+    "contextTokens": 16384
+  },
+  "lockedAt": "2026-11-07T09:00:09.092Z",
+  "storedStatus": "locked",
+  "planned": 3,
+  "completed": 2,
+  "done": false,
+  "slots": [
+    {
+      "slot": "exp_42405c021b81-fixed-r1",
+      "conditionId": "fixed",
+      "repetition": 1,
+      "runId": "exp_42405c021b81-fixed-r1",
+      "attempt": 1,
+      "pending": false,
+      "status": "completed",
+      "excluded": [],
+      "startedAt": "2026-11-07T09:00:09.098Z",
+      "finishedAt": "2026-11-07T10:01:37.356Z",
+      "wallSeconds": 3688,
+      "tasks": 20,
+      "successRate": 0.2,
+      "cumulativeReward": 12.55,
+      "tokens": 670438,
+      "modelCalls": 402,
+      "usd": 0,
+      "generation": 0,
+      "mutationsAccepted": 0,
+      "mutationsRejected": 0,
+      "modelCallFailures": 0,
+      "agentFailures": 0
+    },
+    {
+      "slot": "exp_42405c021b81-pertask-r1",
+      "conditionId": "pertask",
+      "repetition": 1,
+      "runId": "exp_42405c021b81-pertask-r1",
+      "attempt": 1,
+      "pending": false,
+      "status": "completed",
+      "excluded": [],
+      "startedAt": "2026-11-07T10:01:37.368Z",
+      "finishedAt": "2026-11-07T11:12:29.718Z",
+      "wallSeconds": 4252,
+      "tasks": 20,
+      "successRate": 0.15,
+      "cumulativeReward": 12.073242630385488,
+      "tokens": 709797,
+      "modelCalls": 438,
+      "usd": 0,
+      "generation": 0,
+      "mutationsAccepted": 0,
+      "mutationsRejected": 0,
+      "modelCallFailures": 0,
+      "agentFailures": 0
+    },
+    {
+      "slot": "exp_42405c021b81-evoorg-r1",
+      "conditionId": "evoorg",
+      "repetition": 1,
+      "runId": "exp_42405c021b81-evoorg-r1-a2",
+      "attempt": 2,
+      "pending": true,
+      "status": null,
+      "excluded": [
+        {
+          "runId": "exp_42405c021b81-evoorg-r1",
+          "reason": "interrupted (status running)",
+          "tasks": 20,
+          "wallSeconds": 8732
+        }
+      ],
+      "startedAt": null,
+      "finishedAt": null,
+      "wallSeconds": null,
+      "tasks": null,
+      "successRate": null,
+      "cumulativeReward": null,
+      "tokens": null,
+      "modelCalls": null,
+      "usd": null,
+      "generation": null,
+      "mutationsAccepted": null,
+      "mutationsRejected": null,
+      "modelCallFailures": null,
+      "agentFailures": null
+    }
+  ],
+  "shadowRuns": 8,
+  "allRunIds": [
+    "exp_42405c021b81-evoorg-r1",
+    "exp_42405c021b81-evoorg-r1-val1-inc",
+    "exp_42405c021b81-evoorg-r1-val2-minus",
+    "exp_42405c021b81-evoorg-r1-val3-cf",
+    "exp_42405c021b81-evoorg-r1-val4-cf",
+    "exp_42405c021b81-evoorg-r1-val5-cand",
+    "exp_42405c021b81-evoorg-r1-val6-inc",
+    "exp_42405c021b81-evoorg-r1-val7-minus",
+    "exp_42405c021b81-evoorg-r1-val8-cf",
+    "exp_42405c021b81-fixed-r1",
+    "exp_42405c021b81-pertask-r1"
+  ],
+  "scripted": false,
+  "conditions": [
+    {
+      "conditionId": "fixed",
+      "condition": "fixed-specialist",
+      "runs": [
+        "exp_42405c021b81-fixed-r1"
+      ],
+      "cumulativeReward": {
+        "mean": 12.55,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      },
+      "successRate": {
+        "mean": 0.2,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      },
+      "lifetimeTokens": {
+        "mean": 670438,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      },
+      "lifetimeUsd": {
+        "mean": 0,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      },
+      "reviewerCoverage": {
+        "mean": 1,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      },
+      "securitySuccess": {
+        "mean": 0,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      }
+    },
+    {
+      "conditionId": "pertask",
+      "condition": "per-task-adaptive",
+      "runs": [
+        "exp_42405c021b81-pertask-r1"
+      ],
+      "cumulativeReward": {
+        "mean": 12.073242630385488,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      },
+      "successRate": {
+        "mean": 0.15,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      },
+      "lifetimeTokens": {
+        "mean": 709797,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      },
+      "lifetimeUsd": {
+        "mean": 0,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      },
+      "reviewerCoverage": {
+        "mean": 0.95,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      },
+      "securitySuccess": {
+        "mean": 0,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 1
+      }
+    },
+    {
+      "conditionId": "evoorg",
+      "condition": "evoorg",
+      "runs": [],
+      "cumulativeReward": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "successRate": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "lifetimeTokens": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "lifetimeUsd": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "reviewerCoverage": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      },
+      "securitySuccess": {
+        "mean": null,
+        "lo": null,
+        "hi": null,
+        "sd": null,
+        "n": 0
+      }
+    }
+  ],
+  "comparisons": []
+}

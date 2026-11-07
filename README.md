@@ -7,11 +7,13 @@ Automated nightly research sessions for [OrgWorld](https://github.com/roszhan268
 | Experiment | ID | Progress | Locked |
 | --- | --- | --- | --- |
 | feasibility-0 | `exp_a7788fdd09dd` | 0/3 runs | not yet |
+| feasibility-full | `exp_42405c021b81` | 2/3 runs | 2026-11-07T09:00:09.092Z |
 
 ## Sessions
 
 | Date | Outcome | Experiment | New runs | Progress | Why it stopped |
 | --- | --- | --- | --- | --- | --- |
+| [2026-11-07](sessions/2026-11-07.md) | ran | feasibility-full | 0 | 2/3 | publish only: results recorded so far, no new runs |
 | [2026-11-06](sessions/2026-11-06-2.md) | skipped | — | — | — | Started outside the window 01:00–06:30 (the Mac was probably asleep at 01:00). |
 | [2026-11-06](sessions/2026-11-06.md) | blocked | feasibility-0 | — | 0/3 | Ollama runs the model on the CPU, not the GPU (the Intel build under Rosetta: about 8 minutes per agent turn), so no run can finish in one window. Install the Apple-silicon Ollama app (see lab/README.md). |
 
@@ -23,4 +25,4 @@ Automated nightly research sessions for [OrgWorld](https://github.com/roszhan268
 - `data/<experiment>/provenance.json`: the code bundle, model weights digest and runtime that the experiment is locked to, with every recorded change.
 - `sessions.jsonl`: one line per session.
 
-Code for current sessions: [`9d990e7`](https://github.com/roszhan2684/orgworld-public/tree/9d990e7fde1b082cd5774a6e69fca65aeb687889).
+Code for current sessions: [`13f51cb`](https://github.com/roszhan2684/orgworld-public/tree/13f51cbffedaa72c333a51d37f4336a40e862045).
