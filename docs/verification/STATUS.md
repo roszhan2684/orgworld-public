@@ -2,7 +2,7 @@
 
 `IMPLEMENTED` = code + passing automated tests. `VERIFIED` = exercised end-to-end with recorded evidence. `NOT DONE` = absent. Live = real model cognition; scripted = deterministic test provider (mechanics only, never a result).
 
-Test suite: `pnpm typecheck` → 0 errors; `pnpm vitest run --project unit` → 16 files, 153 tests passing (2026-11-06).
+Test suite: `pnpm typecheck` → 0 errors; `pnpm vitest run --project unit` → 16 files, 154 tests passing (2026-11-06).
 
 | Phase | Capability | Status | Evidence |
 |---|---|---|---|

@@ -68,7 +68,7 @@ A laptop must be awake and plugged in at `START_TIME`. Either leave it open with
 - **Settings:** edit `~/orgworld-lab/lab.env` (window, queue, power, push). To change `START_TIME`, re-run `lab/setup.sh` and bootstrap again.
 - **Manual session now:** `FORCE=1 STOP_AT=15:00 HARD_STOP_AT=15:30 ~/orgworld-lab/bin/daily.sh`. Variables set in the environment override `lab.env`.
 - **Logs:** `~/orgworld-lab/logs/`. Per-session working files are in `~/orgworld-lab/state/sessions/`.
-- **Next experiment:** when the queue is finished, the notebook says so. Review the results, then add the next config to `QUEUE`. Per the pilot's pre-registration addendum, `pilot.yaml` follows `feasibility.yaml` only after the feasibility review.
+- **Next experiment:** when the queue is finished, the notebook says so. Review the results, then add the next config to `QUEUE`. Per the pilot protocol (addendum 3: every organization behaviour on), `pilot-full.yaml` follows `feasibility-full.yaml` only after the feasibility review.
 - **New code:** commit, push, and run `lab/setup.sh --refreeze`. Do this only between experiments; an experiment in progress is blocked if its code changes.
 - **Accepting an environment change** (avoid it): `ACCEPT_ENV_CHANGE=1 ~/orgworld-lab/bin/daily.sh` records it as a deviation in the notebook.
 

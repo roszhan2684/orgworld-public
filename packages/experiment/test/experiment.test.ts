@@ -167,6 +167,11 @@ describe('organization checks in evolution (ideas 24–26, C-21)', () => {
     const b = store.runState(bad.conditions[0]!.runs[0]!);
     expect(Object.keys(b.evolution.proposals)).toHaveLength(0);
     expect(b.anomalies[0]).toMatchObject({ kind: 'llm-proposal-unusable' });
+    // Found in the real-model smoke test: the role named only in the hypothesis. The most specific role mentioned wins.
+    llmProposal = { type: 'ADD_AGENT', agentId: '', roleId: '', from: '', to: '', hypothesis: 'Security tasks keep failing; adding a Security Reviewer will catch the traversal bugs.' };
+    const inferred = await runExperiment({ store, provider: scriptedWorld, config: config({ proposer: 'llm' }) });
+    const i = Object.values(store.runState(inferred.conditions[0]!.runs[0]!).evolution.proposals)[0]!.proposal;
+    expect(i).toMatchObject({ proposer: 'llm', mutation: { type: 'ADD_AGENT', agent: { roleId: 'security_reviewer' } }, evidence: { roleReadFromHypothesis: true } });
     llmProposal = { type: 'NONE', hypothesis: 'n/a' };
     store.close();
   }, 120_000);

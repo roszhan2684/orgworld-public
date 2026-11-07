@@ -7,6 +7,7 @@ import { EventStore } from '@orgworld/store';
 import { ScriptedProvider, type CognitionRequest } from '@orgworld/cognition';
 import { familyById } from '@orgworld/bench';
 import { buildRunConfig, createRun, OrgRunner, systemPrompt } from '../src/index.ts';
+import { matchOption } from '../src/organization.ts';
 
 /*
  * MECHANICS TESTS for the organization-behaviour extensions (conflict C-21) with the SCRIPTED provider (test-only).
@@ -229,5 +230,16 @@ describe('prediction and expertise (ideas 21, 23)', () => {
     expect(prompts.filter((p) => p.purpose.startsWith('vote on')).every((p) => !p.prompt.includes('Proposer recommends'))).toBe(true);
     expect(prompts.find((p) => p.purpose.includes('turn 1'))!.prompt).toContain('Plan decided by the team from 2 alternative(s), predicted 60%: Single pass with a counter');
     expect(runner.state.learning!.predictions.map((p) => `${p.source}:${p.refId}`)).toEqual(['plan:plan2', 'vote:' + d.decisionId, 'vote:' + d.decisionId, 'vote:' + d.decisionId]);
+  });
+
+  it('votes count when a small model names the option by id or a clear prefix (found in the real-model smoke test)', () => {
+    const opts = ['plan1: Implement a straightforward approach…', 'plan2: Single pass with a counter'];
+    expect(matchOption('plan2', opts)).toBe(opts[1]);
+    expect(matchOption('Plan2:  single pass with a counter', opts)).toBe(opts[1]);
+    expect(matchOption('plan1: Implement a straightforward approach using a loop to count runs', opts)).toBe(opts[0]); // longer than the truncated option
+    expect(matchOption('plan', opts)).toBeUndefined(); // ambiguous
+    expect(matchOption('plan3', opts)).toBeUndefined();
+    expect(matchOption('B', ['A', 'B'])).toBe('B');
+    expect(matchOption(42, ['A', 'B'])).toBeUndefined();
   });
 });

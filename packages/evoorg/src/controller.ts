@@ -335,12 +335,18 @@ export class EvolutionController {
       `Roles you may use: ${vocab.map((v) => v.id).join(', ')}`,
       `Evidence from the last ${d.window} tasks: success ${(d.successRate * 100).toFixed(0)}%; failures by category ${JSON.stringify(d.failuresByCategory)} of ${JSON.stringify(d.tasksByCategory)}; idle agents: ${d.idleAgents.join(', ') || 'none'}; unused edges: ${d.unusedEdges.slice(0, 5).join(', ') || 'none'}; mean tokens per task ${Math.round(d.meanTokens)}.`,
       ...(lessons.length ? ['Lessons the organization has recorded:', ...lessons] : []),
+      'Fill every field; use "" for fields the change does not need. ADD_AGENT needs roleId; REMOVE_AGENT needs agentId; CHANGE_ROLE needs agentId and roleId; ADD_EDGE and REMOVE_EDGE need from and to.',
       'Reply JSON {"type": "ADD_AGENT|REMOVE_AGENT|CHANGE_ROLE|ADD_EDGE|REMOVE_EDGE|NONE", "agentId": "...", "roleId": "...", "from": "...", "to": "...", "hypothesis": "what will improve and why, citing the evidence"}.',
     ].join('\n');
     const j = (await r.controllerCall('llm proposer', system, prompt, LLM_PROPOSAL_SCHEMA)) as Record<string, unknown> | null;
     if (!j || j.type === 'NONE') return [];
-    const str = (k: string) => (typeof j[k] === 'string' ? (j[k] as string) : '');
-    const role = vocab.find((v) => v.id === str('roleId'));
+    const str = (k: string) => (typeof j[k] === 'string' ? (j[k] as string).trim() : '');
+    // A small model often names the role only in its hypothesis: use it when exactly one known role is mentioned.
+    const mentioned = vocab.filter((v) => new RegExp(`\\b(${v.id.replace(/_/g, '[ _]')}|${v.name.replace(/[^A-Za-z ]/g, '')})\\b`, 'i').test(`${str('roleId')} ${str('hypothesis')}`));
+    // "Security Reviewer" also contains "Reviewer": keep only the most specific roles mentioned.
+    const specific = mentioned.filter((v) => !mentioned.some((o) => o !== v && (o.name.toLowerCase().includes(v.name.toLowerCase()) || o.id.includes(v.id))));
+    const role = vocab.find((v) => v.id === str('roleId')) ?? (specific.length === 1 ? specific[0] : undefined);
+    const inferred = !!role && role.id !== str('roleId');
     const raw =
       j.type === 'ADD_AGENT' && role
         ? { type: 'ADD_AGENT', agent: { id: `${role.id}_g${g.generation + 1}`, name: role.name, roleId: role.id }, role }
@@ -360,7 +366,7 @@ export class EvolutionController {
     }
     const hypothesis = truncate(str('hypothesis') || 'no hypothesis given', 400);
     const worst = Object.entries(d.failuresByCategory).sort((a, b) => b[1] - a[1])[0];
-    return [propose(m.data, { window: d.window, successRate: d.successRate, ...(worst ? { worstCategory: worst[0], failuresInWindow: worst[1] } : {}), idleAgents: d.idleAgents.join(',') }, hypothesis, 'llm')];
+    return [propose(m.data, { window: d.window, successRate: d.successRate, ...(worst ? { worstCategory: worst[0], failuresInWindow: worst[1] } : {}), idleAgents: d.idleAgents.join(','), ...(inferred ? { roleReadFromHypothesis: true } : {}) }, hypothesis, 'llm')];
   }
 
   private async evaluate(genome: OrganizationGenome, buffer: HistoryItem[], tag: string): Promise<Evaluation> {
@@ -410,7 +416,7 @@ const LLM_PROPOSAL_SCHEMA = {
     to: { type: 'string' },
     hypothesis: { type: 'string' },
   },
-  required: ['type', 'hypothesis'],
+  required: ['type', 'agentId', 'roleId', 'from', 'to', 'hypothesis'],
 };
 
 export { validateGenome, capabilitiesOf };

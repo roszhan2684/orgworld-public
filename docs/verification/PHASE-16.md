@@ -49,6 +49,15 @@
 
 **In use (2026-11-06, researcher decision).** Every behaviour is on for every team in `experiments/pilot/feasibility-full.yaml` (queued for the nightly lab) and `experiments/pilot/pilot-full.yaml` (pilot protocol addendum 3).
 
+**Real-model smoke test (2026-11-06, scratch database, not research data).**
+- **Setup:** qwen2.5-coder:7b on the GPU (Ollama 0.40.15), feasibility-full settings, 2 RLE tasks, one evolution trigger.
+- **Result:** completed in 4 min 14 s; task 1 passed, task 2 scored 0.83.
+- **Call health:** 43 model calls, 0 failed calls, 0 prompts truncated; median latency 5.0 s (max 29 s); median prompt 644 tokens (max 1,843).
+- **What fired:** plans with predictions (scored, Brier 0.04 and 0.64), pre-mortems, after-action reviews with three "why?" steps and a lesson, playbook, decision journal, lesson scoring, a contribution check, and a counterfactual screen that rejected removing an idle agent (0.815 vs 0.819 observed).
+- **Two defects found and fixed before the first lab night:**
+  1. Every vote on the plan decision was rejected because voters didn't copy the long option text verbatim, so no real vote or debate happened. Votes now match by option id (`plan2`) or a unique prefix (`matchOption`), and the prompt says so.
+  2. The LLM proposer named the role only in its hypothesis ("add a tester"), so the proposal was unusable. Every field is now required, and a role mentioned in the hypothesis is used when exactly one known role, the most specific, is mentioned (recorded as `roleReadFromHypothesis`).
+
 **Not done.**
 - No real-model run of any extension. Whether the 7B model debates usefully, writes useful lessons or predicts well is unknown.
 - The views are not yet placed in the app's layout.

@@ -27,6 +27,25 @@ function similar(stored: string, b: string): boolean {
   const inter = [...B].filter((w) => A.has(w)).length;
   return B.size > 0 && inter / new Set([...A, ...B]).size >= 0.6;
 }
+/**
+ * The option a vote names. Small models rarely copy long options verbatim, so after an exact match this accepts a
+ * case/space-insensitive match, a unique option the vote starts with (or that starts with the vote), or a unique
+ * option id before ":" (e.g. "plan2"). Anything else is an invalid vote, recorded as an abstention.
+ */
+export function matchOption(raw: unknown, options: string[]): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const norm = (x: string) => x.toLowerCase().replace(/…$/, '').replace(/\s+/g, ' ').trim();
+  const v = norm(raw);
+  if (!v) return undefined;
+  const exact = options.find((o) => o === raw) ?? options.find((o) => norm(o) === v);
+  if (exact) return exact;
+  const prefix = options.filter((o) => norm(o).startsWith(v) || v.startsWith(norm(o)));
+  if (prefix.length === 1) return prefix[0];
+  const id = (x: string) => norm(x).split(':')[0]!.trim();
+  const byId = options.filter((o) => o.includes(':') && id(o) === id(raw));
+  return byId.length === 1 ? byId[0] : undefined;
+}
+
 const clamp01 = (x: unknown): number => (typeof x === 'number' && Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : 0.5);
 const tagsOf = (m: MemoryItem): string[] => m.tags ?? [];
 type Json = Record<string, unknown>;
@@ -335,7 +354,7 @@ export async function deliberate(r: OrgRunner, ctx: TaskCtx, proposer: string, a
       ...(past.length ? ['Similar past decisions and how they turned out:', ...past.map((m) => `- ${truncate(m.content, 300)}`)] : []),
       ...extra,
       `Evidence you can cite (artifact ids you know): ${taskArtifacts(r, ctx, v).join(', ') || 'none'}.${f.evidenceRule ? ' Votes that cite no evidence you can see count half.' : ''}`,
-      `Vote for exactly one option (copy it verbatim) with a one-sentence rationale${predict ? ', your probability (0-1) that the task will pass if your option is chosen as "confidence"' : ''}, and the ids you rely on as "evidence".`,
+      `Vote for exactly one option (copy it verbatim${a.options.every((o) => o.includes(':')) ? ', or just its id before ":"' : ''}) with a one-sentence rationale${predict ? ', your probability (0-1) that the task will pass if your option is chosen as "confidence"' : ''}, and the ids you rely on as "evidence".`,
       `Reply JSON {"option": "...", "rationale": "..."${predict ? ', "confidence": 0.0' : ''}, "evidence": ["..."]}.`,
     ].join('\n');
 
@@ -349,8 +368,8 @@ export async function deliberate(r: OrgRunner, ctx: TaskCtx, proposer: string, a
         return;
       }
       if (!j) continue;
-      const option = typeof j.option === 'string' ? j.option : undefined;
-      if (!option || !a.options.includes(option)) {
+      const option = matchOption(j.option, a.options);
+      if (!option) {
         r.emit1({ type: 'ACTION_REJECTED', actorId: 'runtime', payload: { agentId: v, action: 'vote', reason: `invalid option ${JSON.stringify(j.option)} — abstention recorded`, taskId: ctx.taskId } });
         continue;
       }

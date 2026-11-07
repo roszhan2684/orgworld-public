@@ -36635,6 +36635,19 @@ function similar(stored, b) {
   const inter = [...B].filter((w) => A.has(w)).length;
   return B.size > 0 && inter / (/* @__PURE__ */ new Set([...A, ...B])).size >= 0.6;
 }
+function matchOption(raw, options) {
+  if (typeof raw !== "string") return void 0;
+  const norm = (x2) => x2.toLowerCase().replace(/…$/, "").replace(/\s+/g, " ").trim();
+  const v = norm(raw);
+  if (!v) return void 0;
+  const exact = options.find((o) => o === raw) ?? options.find((o) => norm(o) === v);
+  if (exact) return exact;
+  const prefix = options.filter((o) => norm(o).startsWith(v) || v.startsWith(norm(o)));
+  if (prefix.length === 1) return prefix[0];
+  const id2 = (x2) => norm(x2).split(":")[0].trim();
+  const byId = options.filter((o) => o.includes(":") && id2(o) === id2(raw));
+  return byId.length === 1 ? byId[0] : void 0;
+}
 var clamp01 = (x2) => typeof x2 === "number" && Number.isFinite(x2) ? Math.max(0, Math.min(1, x2)) : 0.5;
 var tagsOf = (m) => m.tags ?? [];
 function usesDeliberation(cfg) {
@@ -36886,7 +36899,7 @@ async function deliberate(r2, ctx, proposer, a, cause) {
     ...past.length ? ["Similar past decisions and how they turned out:", ...past.map((m) => `- ${truncate(m.content, 300)}`)] : [],
     ...extra,
     `Evidence you can cite (artifact ids you know): ${taskArtifacts(r2, ctx, v).join(", ") || "none"}.${f.evidenceRule ? " Votes that cite no evidence you can see count half." : ""}`,
-    `Vote for exactly one option (copy it verbatim) with a one-sentence rationale${predict ? ', your probability (0-1) that the task will pass if your option is chosen as "confidence"' : ""}, and the ids you rely on as "evidence".`,
+    `Vote for exactly one option (copy it verbatim${a.options.every((o) => o.includes(":")) ? ', or just its id before ":"' : ""}) with a one-sentence rationale${predict ? ', your probability (0-1) that the task will pass if your option is chosen as "confidence"' : ""}, and the ids you rely on as "evidence".`,
     `Reply JSON {"option": "...", "rationale": "..."${predict ? ', "confidence": 0.0' : ""}, "evidence": ["..."]}.`
   ].join("\n");
   let budgetLeft = true;
@@ -36899,8 +36912,8 @@ async function deliberate(r2, ctx, proposer, a, cause) {
         return;
       }
       if (!j) continue;
-      const option = typeof j.option === "string" ? j.option : void 0;
-      if (!option || !a.options.includes(option)) {
+      const option = matchOption(j.option, a.options);
+      if (!option) {
         r2.emit1({ type: "ACTION_REJECTED", actorId: "runtime", payload: { agentId: v, action: "vote", reason: `invalid option ${JSON.stringify(j.option)} \u2014 abstention recorded`, taskId: ctx.taskId } });
         continue;
       }
@@ -38281,12 +38294,16 @@ var EvolutionController = class {
       `Roles you may use: ${vocab.map((v) => v.id).join(", ")}`,
       `Evidence from the last ${d.window} tasks: success ${(d.successRate * 100).toFixed(0)}%; failures by category ${JSON.stringify(d.failuresByCategory)} of ${JSON.stringify(d.tasksByCategory)}; idle agents: ${d.idleAgents.join(", ") || "none"}; unused edges: ${d.unusedEdges.slice(0, 5).join(", ") || "none"}; mean tokens per task ${Math.round(d.meanTokens)}.`,
       ...lessons.length ? ["Lessons the organization has recorded:", ...lessons] : [],
+      'Fill every field; use "" for fields the change does not need. ADD_AGENT needs roleId; REMOVE_AGENT needs agentId; CHANGE_ROLE needs agentId and roleId; ADD_EDGE and REMOVE_EDGE need from and to.',
       'Reply JSON {"type": "ADD_AGENT|REMOVE_AGENT|CHANGE_ROLE|ADD_EDGE|REMOVE_EDGE|NONE", "agentId": "...", "roleId": "...", "from": "...", "to": "...", "hypothesis": "what will improve and why, citing the evidence"}.'
     ].join("\n");
     const j = await r2.controllerCall("llm proposer", system, prompt, LLM_PROPOSAL_SCHEMA);
     if (!j || j.type === "NONE") return [];
-    const str2 = (k) => typeof j[k] === "string" ? j[k] : "";
-    const role = vocab.find((v) => v.id === str2("roleId"));
+    const str2 = (k) => typeof j[k] === "string" ? j[k].trim() : "";
+    const mentioned = vocab.filter((v) => new RegExp(`\\b(${v.id.replace(/_/g, "[ _]")}|${v.name.replace(/[^A-Za-z ]/g, "")})\\b`, "i").test(`${str2("roleId")} ${str2("hypothesis")}`));
+    const specific = mentioned.filter((v) => !mentioned.some((o) => o !== v && (o.name.toLowerCase().includes(v.name.toLowerCase()) || o.id.includes(v.id))));
+    const role = vocab.find((v) => v.id === str2("roleId")) ?? (specific.length === 1 ? specific[0] : void 0);
+    const inferred = !!role && role.id !== str2("roleId");
     const raw = j.type === "ADD_AGENT" && role ? { type: "ADD_AGENT", agent: { id: `${role.id}_g${g.generation + 1}`, name: role.name, roleId: role.id }, role } : j.type === "REMOVE_AGENT" ? { type: "REMOVE_AGENT", agentId: str2("agentId") } : j.type === "CHANGE_ROLE" && role ? { type: "CHANGE_ROLE", agentId: str2("agentId"), role } : j.type === "ADD_EDGE" ? { type: "ADD_EDGE", edge: { from: str2("from"), to: str2("to"), kind: "delegate" } } : j.type === "REMOVE_EDGE" ? { type: "REMOVE_EDGE", from: str2("from"), to: str2("to") } : null;
     const m = raw ? Mutation.safeParse(raw) : null;
     if (!m?.success) {
@@ -38295,7 +38312,7 @@ var EvolutionController = class {
     }
     const hypothesis = truncate(str2("hypothesis") || "no hypothesis given", 400);
     const worst = Object.entries(d.failuresByCategory).sort((a, b) => b[1] - a[1])[0];
-    return [propose(m.data, { window: d.window, successRate: d.successRate, ...worst ? { worstCategory: worst[0], failuresInWindow: worst[1] } : {}, idleAgents: d.idleAgents.join(",") }, hypothesis, "llm")];
+    return [propose(m.data, { window: d.window, successRate: d.successRate, ...worst ? { worstCategory: worst[0], failuresInWindow: worst[1] } : {}, idleAgents: d.idleAgents.join(","), ...inferred ? { roleReadFromHypothesis: true } : {} }, hypothesis, "llm")];
   }
   async evaluate(genome, buffer, tag) {
     const parent = this.o.runner;
@@ -38332,7 +38349,7 @@ var LLM_PROPOSAL_SCHEMA = {
     to: { type: "string" },
     hypothesis: { type: "string" }
   },
-  required: ["type", "hypothesis"]
+  required: ["type", "agentId", "roleId", "from", "to", "hypothesis"]
 };
 
 // packages/evoorg/src/designer.ts
