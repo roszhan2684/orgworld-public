@@ -12,6 +12,7 @@ Automated nightly research sessions for [OrgWorld](https://github.com/roszhan268
 
 | Date | Outcome | Experiment | New runs | Progress | Why it stopped |
 | --- | --- | --- | --- | --- | --- |
+| [2026-11-06](sessions/2026-11-06-2.md) | skipped | — | — | — | Started outside the window 01:00–06:30 (the Mac was probably asleep at 01:00). |
 | [2026-11-06](sessions/2026-11-06.md) | blocked | feasibility-0 | — | 0/3 | Ollama runs the model on the CPU, not the GPU (the Intel build under Rosetta: about 8 minutes per agent turn), so no run can finish in one window. Install the Apple-silicon Ollama app (see lab/README.md). |
 
 ## Reading the data
