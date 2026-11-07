@@ -210,4 +210,24 @@ describe('prediction and expertise (ideas 21, 23)', () => {
     expect(runner.state.learning!.predictions).toMatchObject([{ source: 'plan', refId: 'plan2', predicted: 0.9, actual: 1 }]);
     expect(systemPrompt(runner.state, runner.config, 'solo', ['wait'])).toContain('Track record (finished tasks worked on that passed, by category): you: implementation 1/1.');
   });
+
+  it('planDecision: the team votes between the plans (blind), may overrule the entry agent, and that plan is scored', async () => {
+    const { runner, prompts } = setup('generalists-4', { multiPath: true, planDecision: true, blindVote: true, trackRecord: true }, (req, r) => {
+      const me = agentOf(req)!;
+      if (req.purpose === 'plan paths') return { plans: [{ summary: 'Regex-based encoder', predictedSuccess: 0.9 }, { summary: 'Single pass with a counter', predictedSuccess: 0.6 }] };
+      if (req.purpose.startsWith('vote on')) return { option: 'plan2: Single pass with a counter', rationale: `${me}: simpler`, confidence: 0.7, evidence: [] };
+      if (me !== 'a1') return { reasoning: 'idle', actions: [{ type: 'wait' }] };
+      const art = created(req.prompt);
+      if (art) return { reasoning: 'submit', actions: [{ type: 'submit', artifactId: art }] };
+      void r;
+      return { reasoning: 'write', actions: [{ type: 'write_code', title: 'impl', code: reference(req.prompt) }] };
+    });
+    await runner.runTask({ kind: 'bench', task });
+    const d = Object.values(runner.state.decisions)[0]!;
+    expect(d.question).toBe('Which plan should the team follow for this task?');
+    expect(d.outcome).toMatchObject({ chosen: 'plan2: Single pass with a counter' }); // 3 votes against a1's recommendation
+    expect(prompts.filter((p) => p.purpose.startsWith('vote on')).every((p) => !p.prompt.includes('Proposer recommends'))).toBe(true);
+    expect(prompts.find((p) => p.purpose.includes('turn 1'))!.prompt).toContain('Plan decided by the team from 2 alternative(s), predicted 60%: Single pass with a counter');
+    expect(runner.state.learning!.predictions.map((p) => `${p.source}:${p.refId}`)).toEqual(['plan:plan2', 'vote:' + d.decisionId, 'vote:' + d.decisionId, 'vote:' + d.decisionId]);
+  });
 });

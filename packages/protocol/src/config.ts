@@ -116,6 +116,8 @@ export const FeatureFlags = z
     preMortem: z.boolean().optional(),
     /** Before a task, the entry agent sketches alternative plans with predicted success and follows the best. */
     multiPath: z.boolean().optional(),
+    /** With multiPath: the team decides between the plans (votes, and debate etc. when those are on) before work starts. */
+    planDecision: z.boolean().optional(),
     /** Predictions are scored against outcomes; calibration (not raw success count) sets vote weight. */
     trackRecord: z.boolean().optional(),
     /** Agents see who in their contacts has done well at which task category. */

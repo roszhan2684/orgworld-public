@@ -14,7 +14,7 @@ describe('pre-registered experiment configs', () => {
     expect(load('experiments/pilot/pilot.yaml').conditions).toHaveLength(5);
   });
 
-  for (const rel of ['experiments/pilot/pilot.yaml', 'experiments/pilot/feasibility.yaml', 'experiments/pilot-claude/pilot-claude.yaml', 'experiments/safety/verification-erosion.yaml', 'experiments/organization/org-behaviour-pilot.yaml'])
+  for (const rel of ['experiments/pilot/pilot.yaml', 'experiments/pilot/feasibility.yaml', 'experiments/pilot-claude/pilot-claude.yaml', 'experiments/safety/verification-erosion.yaml', 'experiments/organization/org-behaviour-pilot.yaml', 'experiments/pilot/feasibility-full.yaml', 'experiments/pilot/pilot-full.yaml'])
     it(`${rel}: parses, every starting organization satisfies its Ω, paid models are priced`, () => {
       const c = load(rel);
       for (const cond of c.conditions) {
@@ -65,4 +65,24 @@ describe('organization-behaviour pilot (draft, C-21)', () => {
     expect(Object.keys(pilot.controls.features).sort()).toEqual(['beliefs', 'crossTaskMemory', 'decisions', 'meetings', 'relationships']);
     expect(pilot.controls.model.contextTokens).toBeUndefined();
   });
+});
+
+describe('full-feature pilot (addendum 3)', () => {
+  const ALL = ['afterActionReview', 'playbook', 'lessonScoring', 'decisionJournal', 'debate', 'evidenceRule', 'blindVote', 'tieBreak', 'preMortem', 'multiPath', 'planDecision', 'trackRecord', 'expertiseDirectory'];
+  for (const [full, orig] of [
+    ['experiments/pilot/feasibility-full.yaml', 'experiments/pilot/feasibility.yaml'],
+    ['experiments/pilot/pilot-full.yaml', 'experiments/pilot/pilot.yaml'],
+  ] as const)
+    it(`${full} equals ${orig} except features, pinned context, equal larger budget and EvoOrg's organization checks`, () => {
+      const a = load(full);
+      const b = load(orig);
+      for (const k of ALL) expect(a.controls.features[k as keyof typeof a.controls.features]).toBe(true);
+      expect(a.controls.model).toEqual({ ...b.controls.model, contextTokens: 16384 });
+      expect(a.controls.budget.perTask).toEqual({ maxTokens: 120000, maxCalls: 40, maxUsd: 0.25, reserveTokens: 4000 });
+      expect(a.stream).toEqual(b.stream);
+      expect(a.repetitions).toBe(b.repetitions);
+      const strip = (c: (typeof a.conditions)[number]) => ({ ...c, evolution: c.evolution ? Object.fromEntries(Object.entries(c.evolution).filter(([k]) => !['counterfactualReview', 'contributionCheck', 'proposer'].includes(k))) : undefined });
+      expect(a.conditions.map(strip)).toEqual(b.conditions.map(strip));
+      expect(a.conditions.find((c) => c.condition === 'evoorg')!.evolution).toMatchObject({ counterfactualReview: true, contributionCheck: true, proposer: 'both' });
+    });
 });

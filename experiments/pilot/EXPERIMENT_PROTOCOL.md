@@ -26,3 +26,17 @@ The feasibility run and the pilot are executed by `lab/daily.sh` in nightly time
 - **Runtime.** The 2026-10-29 timings came from an Intel Ollama build running on the CPU under Rosetta. The lab requires Ollama on the GPU (Apple silicon build). The model weights are the same; generation speed is not, so the feasibility run measures runtime again.
 - **Interim readings.** Each session publishes progress and interim aggregates on the `lab-notebook` branch. They are labelled interim, they do not change the stopping rule (all planned runs), and the pre-registered analysis is run once, on the complete set.
 - **Order.** `pilot.yaml` joins the queue only after the researcher has reviewed the feasibility results (runtime per task, format compliance, failure modes).
+
+## Addendum 3 (2026-11-06, before any pilot data): every organization behaviour on
+The researcher decided that the pilot runs with every organization behaviour on for every team: the learning loop, deliberation, prediction and organization checks (conflict C-21; `docs/verification/PHASE-16.md`). `feasibility-full.yaml` and `pilot-full.yaml` are the configurations. They replace `feasibility.yaml` and `pilot.yaml`, which were never run and are kept unchanged as the original registration.
+- **What is identical:** the question, hypotheses, falsification criteria, task stream, seeds, conditions, repetitions and analysis.
+- **What differs, and why:**
+  - every C-21 behaviour is on for every team, so all teams have the same member capabilities;
+  - EvoOrg's evolution also uses the counterfactual screen, the contribution check, and self-proposed changes (`proposer: both`);
+  - the per-task budget is 120k tokens / 40 calls, the same for every condition, because the behaviours pay for their calls out of it;
+  - the context is pinned to 16,384 tokens so prompts are not cut.
+- **What this changes in the interpretation:**
+  - every team now carries lessons, its playbook and its decision journal from task to task within a run. The fixed and per-task teams keep their structures but are no longer memoryless, so the comparison tests structural evolution on top of shared member learning, not structure versus no learning at all;
+  - FC2 (lifetime tokens) now includes every review, debate, plan and replay;
+  - the random-evolution arm keeps its random proposer.
+- **Order:** `feasibility-full.yaml` first. It reports runtime per task, format compliance, prompt truncation and how often each behaviour fires. `pilot-full.yaml` joins the queue after the researcher has reviewed those results.

@@ -16,6 +16,7 @@
 | 19 | `features.tieBreak` | Without a majority, the agent with decision authority (else the entry agent) settles it with its own vote. | 0 |
 | 20 | `features.preMortem` | After a decision, a critic imagines it failed and names the risks and one mitigation. | 1 |
 | 21 | `features.multiPath` | Before the first turn, the entry agent sketches 2–3 plans with predicted success. The best guides the team, and its prediction is scored. | 1 per task |
+| 21b | `features.planDecision` | With multiPath: the team votes between the plans before work starts (using whichever deliberation features are on), and may overrule the entry agent. | votes (+ debate when on) |
 | 22 | `features.trackRecord` | Predictions are scored (Brier), and 0.5 + (1 − mean Brier) sets each agent's vote weight. | 0 |
 | 23 | `features.expertiseDirectory` | Each agent sees who among it and its contacts has passed which categories. | 0 |
 | 24 | `evolution.counterfactualReview` | A proposal is first replayed on the recently failed tasks and compared with what actually happened. If it isn't better, it's rejected before full validation. | shadow replays (validation cost) |
@@ -45,6 +46,8 @@
 - `pilot-config.test.ts › adding the optional feature flags did not change the pre-registered configs (same parsed form, same hash)`
 - `research-views.test.ts › render decisions, debate, lessons and expertise from recorded events, escaping agent text`
 - `cognition.test.ts › … num_ctx sent only when configured`
+
+**In use (2026-11-06, researcher decision).** Every behaviour is on for every team in `experiments/pilot/feasibility-full.yaml` (queued for the nightly lab) and `experiments/pilot/pilot-full.yaml` (pilot protocol addendum 3).
 
 **Not done.**
 - No real-model run of any extension. Whether the 7B model debates usefully, writes useful lessons or predicts well is unknown.

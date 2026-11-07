@@ -30977,6 +30977,8 @@ var FeatureFlags = external_exports.object({
   preMortem: external_exports.boolean().optional(),
   /** Before a task, the entry agent sketches alternative plans with predicted success and follows the best. */
   multiPath: external_exports.boolean().optional(),
+  /** With multiPath: the team decides between the plans (votes, and debate etc. when those are on) before work starts. */
+  planDecision: external_exports.boolean().optional(),
   /** Predictions are scored against outcomes; calibration (not raw success count) sets vote weight. */
   trackRecord: external_exports.boolean().optional(),
   /** Agents see who in their contacts has done well at which task category. */
@@ -36813,10 +36815,24 @@ async function planPaths(r2, ctx) {
   const plans = j.plans.filter((p) => !!p && typeof p.summary === "string" && !!p.summary.trim()).slice(0, 3).map((p, i2) => ({ planId: `plan${i2 + 1}`, summary: truncate(p.summary.trim(), 400), predictedSuccess: clamp01(p.predictedSuccess) }));
   if (!plans.length) return;
   const best = plans.reduce((b, p) => p.predictedSuccess > b.predictedSuccess ? p : b);
-  r2.emit1({ type: "PLANS_PROPOSED", actorId: entry, payload: { taskId: ctx.taskId, agentId: entry, plans, chosenPlanId: best.planId } });
-  ctx.plan = { planId: best.planId, predicted: best.predictedSuccess, agentId: entry };
-  const others = plans.filter((p) => p !== best).map((p) => `${p.summary} (${(p.predictedSuccess * 100).toFixed(0)}%)`);
-  (ctx.pendingFeedback[entry] ??= []).push(`Plan chosen from ${plans.length} alternative(s), predicted ${(best.predictedSuccess * 100).toFixed(0)}%: ${best.summary}${others.length ? ` \u2014 set aside: ${others.join("; ")}` : ""}`);
+  const proposed = r2.emit1({ type: "PLANS_PROPOSED", actorId: entry, payload: { taskId: ctx.taskId, agentId: entry, plans, chosenPlanId: best.planId } });
+  let chosen = best;
+  let byTeam = false;
+  const voters = r2.contacts(entry, r2.genome.edges.filter((e) => e.from === entry).map((e) => e.to));
+  if (r2.config.features.planDecision && plans.length > 1 && voters.length) {
+    const option = (p) => `${p.planId}: ${truncate(p.summary, 110)}`;
+    (ctx.reasoning[entry] ??= []).push(truncate(`I sketched ${plans.length} plans; ${best.planId} looks most likely to pass (${(best.predictedSuccess * 100).toFixed(0)}%).`, 300));
+    await deliberate(r2, ctx, entry, { type: "propose_decision", question: "Which plan should the team follow for this task?", options: plans.map(option), recommendation: option(best) }, proposed.eventId);
+    const d = [...r2.state.decisionOrder].reverse().map((id2) => r2.state.decisions[id2]).find((x2) => x2.taskId === ctx.taskId);
+    const pick3 = plans.find((p) => option(p) === d?.outcome?.chosen);
+    if (pick3) {
+      chosen = pick3;
+      byTeam = true;
+    }
+  }
+  ctx.plan = { planId: chosen.planId, predicted: chosen.predictedSuccess, agentId: entry };
+  const others = plans.filter((p) => p !== chosen).map((p) => `${p.summary} (${(p.predictedSuccess * 100).toFixed(0)}%)`);
+  (ctx.pendingFeedback[entry] ??= []).push(`Plan ${byTeam ? "decided by the team" : "chosen"} from ${plans.length} alternative(s), predicted ${(chosen.predictedSuccess * 100).toFixed(0)}%: ${chosen.summary}${others.length ? ` \u2014 set aside: ${others.join("; ")}` : ""}`);
 }
 function ballotFor(r2, agentId, option, evidenceValid) {
   const f = r2.config.features;

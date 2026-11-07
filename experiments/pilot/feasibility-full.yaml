@@ -1,0 +1,30 @@
+# Feasibility run for the FULL-FEATURE pilot (declared 2026-11-06 BEFORE running; NOT a hypothesis test).
+# Researcher decision (EXPERIMENT_PROTOCOL.md, addendum 3): every organization behaviour (C-21) is on for every team.
+# Same stream and conditions as feasibility.yaml; only the features, the pinned context and the (equal) budget differ.
+# Purpose: runtime per task, JSON-format compliance, failure modes, and whether each behaviour actually fires on the
+# free local model. Results are reported as feasibility only.
+experiment:
+  name: feasibility-full
+  description: Runtime and failure-mode check for the full-feature pilot (all organization behaviours on). Not used to test any hypothesis.
+stream:
+  kind: abrupt
+  tasks: 20
+  seed: 101
+  phases:
+    - id: A
+      mix: { implementation: 0.6, debugging: 0.3, testing: 0.1 }
+    - id: B
+      mix: { security: 0.5, implementation: 0.2, debugging: 0.2, refactoring: 0.1 }
+conditions:
+  - { id: fixed, condition: fixed-specialist, preset: specialist-pool }
+  - { id: pertask, condition: per-task-adaptive, preset: specialist-pool }
+  - id: evoorg
+    condition: evoorg
+    preset: generalists-4
+    evolution: { trigger: { kind: periodic, everyK: 10 }, minTasksBeforeFirst: 10, bufferRecent: 3, bufferHistorical: 1, delta: 0.05, counterfactualReview: true, contributionCheck: true, proposer: both }
+repetitions: 1
+controls:
+  model: { provider: ollama, model: "qwen2.5-coder:7b", seed: 7, temperature: 0, contextTokens: 16384 }
+  budget: { perTask: { maxTokens: 120000, maxCalls: 40, maxUsd: 0.25, reserveTokens: 4000 } }
+  features: { afterActionReview: true, playbook: true, lessonScoring: true, decisionJournal: true, debate: true, evidenceRule: true, blindVote: true, tieBreak: true, preMortem: true, multiPath: true, planDecision: true, trackRecord: true, expertiseDirectory: true }
+  maxTotalUsd: 1

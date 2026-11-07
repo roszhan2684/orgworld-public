@@ -1,0 +1,34 @@
+# FULL-FEATURE pilot (EXPERIMENT_PROTOCOL.md, addendum 3, 2026-11-06, before any pilot data). Same question, stream,
+# conditions, seeds and analysis as pilot.yaml; every organization behaviour (C-21) is on for every team, the context
+# is pinned, and the per-task budget is larger and identical for all. Runs after feasibility-full has been reviewed.
+experiment:
+  name: pilot-full
+  description: With every organization behaviour on for every team, does persistent organizational learning beat fixed and per-task-adaptive organizations under an abrupt task-distribution shift at matched per-task budget?
+  hypotheses: [III-H1, III-H2, FC1, FC2, FC4, FC6]
+stream:
+  kind: abrupt
+  tasks: 100
+  seed: 101
+  phases:
+    - id: A
+      mix: { implementation: 0.6, debugging: 0.3, testing: 0.1 }
+    - id: B
+      mix: { security: 0.5, implementation: 0.2, debugging: 0.2, refactoring: 0.1 }
+conditions:
+  - { id: single, condition: single-agent, preset: single-agent }
+  - { id: fixed, condition: fixed-specialist, preset: specialist-pool }
+  - { id: pertask, condition: per-task-adaptive, preset: specialist-pool }
+  - id: evoorg
+    condition: evoorg
+    preset: generalists-4
+    evolution: { trigger: { kind: periodic, everyK: 20 }, minTasksBeforeFirst: 20, bufferRecent: 4, bufferHistorical: 2, delta: 0.05, counterfactualReview: true, contributionCheck: true, proposer: both }
+  - id: random
+    condition: random-evolution
+    preset: generalists-4
+    evolution: { trigger: { kind: periodic, everyK: 20 }, minTasksBeforeFirst: 20 }
+repetitions: 3
+controls:
+  model: { provider: ollama, model: "qwen2.5-coder:7b", seed: 7, temperature: 0, contextTokens: 16384 }
+  budget: { perTask: { maxTokens: 120000, maxCalls: 40, maxUsd: 0.25, reserveTokens: 4000 } }
+  features: { afterActionReview: true, playbook: true, lessonScoring: true, decisionJournal: true, debate: true, evidenceRule: true, blindVote: true, tieBreak: true, preMortem: true, multiPath: true, planDecision: true, trackRecord: true, expertiseDirectory: true }
+  maxTotalUsd: 1

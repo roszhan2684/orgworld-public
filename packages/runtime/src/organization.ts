@@ -12,7 +12,8 @@ import type { TaskOutcome } from './tasks.ts';
  * Organization-behaviour extensions (conflict C-21), each behind a feature flag that is off by default:
  *   learning loop  — afterActionReview (12), playbook (13), lessonScoring (14), decisionJournal (15)
  *   deliberation   — debate (16), evidenceRule (17), blindVote (18), tieBreak (19), preMortem (20)
- *   prediction     — multiPath (21), trackRecord (22); expertiseDirectory (23) lives in prompts.ts
+ *   prediction     — multiPath (21) with planDecision (the team decides between the plans), trackRecord (22);
+ *                    expertiseDirectory (23) lives in prompts.ts
  * Every model call here is a real call by a named agent, charged to the task budget, and every result is an event.
  * Token rules: calls happen only where they can change something (a debate only on disagreement, a review only after
  * a failure or a category's first success), outputs are capped, and hidden-test details never reach a prompt.
@@ -244,10 +245,25 @@ export async function planPaths(r: OrgRunner, ctx: TaskCtx): Promise<void> {
     .map((p, i) => ({ planId: `plan${i + 1}`, summary: truncate(p.summary.trim(), 400), predictedSuccess: clamp01(p.predictedSuccess) }));
   if (!plans.length) return;
   const best = plans.reduce((b, p) => (p.predictedSuccess > b.predictedSuccess ? p : b));
-  r.emit1({ type: 'PLANS_PROPOSED', actorId: entry, payload: { taskId: ctx.taskId, agentId: entry, plans, chosenPlanId: best.planId } });
-  ctx.plan = { planId: best.planId, predicted: best.predictedSuccess, agentId: entry };
-  const others = plans.filter((p) => p !== best).map((p) => `${p.summary} (${(p.predictedSuccess * 100).toFixed(0)}%)`);
-  (ctx.pendingFeedback[entry] ??= []).push(`Plan chosen from ${plans.length} alternative(s), predicted ${(best.predictedSuccess * 100).toFixed(0)}%: ${best.summary}${others.length ? ` — set aside: ${others.join('; ')}` : ''}`);
+  const proposed = r.emit1({ type: 'PLANS_PROPOSED', actorId: entry, payload: { taskId: ctx.taskId, agentId: entry, plans, chosenPlanId: best.planId } });
+  let chosen = best;
+  let byTeam = false;
+  // planDecision: the team decides between the plans, with whichever deliberation features are on.
+  const voters = r.contacts(entry, r.genome.edges.filter((e) => e.from === entry).map((e) => e.to));
+  if (r.config.features.planDecision && plans.length > 1 && voters.length) {
+    const option = (p: (typeof plans)[number]) => `${p.planId}: ${truncate(p.summary, 110)}`;
+    (ctx.reasoning[entry] ??= []).push(truncate(`I sketched ${plans.length} plans; ${best.planId} looks most likely to pass (${(best.predictedSuccess * 100).toFixed(0)}%).`, 300));
+    await deliberate(r, ctx, entry, { type: 'propose_decision', question: 'Which plan should the team follow for this task?', options: plans.map(option), recommendation: option(best) }, proposed.eventId);
+    const d = [...r.state.decisionOrder].reverse().map((id) => r.state.decisions[id]!).find((x) => x.taskId === ctx.taskId);
+    const pick = plans.find((p) => option(p) === d?.outcome?.chosen);
+    if (pick) {
+      chosen = pick;
+      byTeam = true;
+    }
+  }
+  ctx.plan = { planId: chosen.planId, predicted: chosen.predictedSuccess, agentId: entry };
+  const others = plans.filter((p) => p !== chosen).map((p) => `${p.summary} (${(p.predictedSuccess * 100).toFixed(0)}%)`);
+  (ctx.pendingFeedback[entry] ??= []).push(`Plan ${byTeam ? 'decided by the team' : 'chosen'} from ${plans.length} alternative(s), predicted ${(chosen.predictedSuccess * 100).toFixed(0)}%: ${chosen.summary}${others.length ? ` — set aside: ${others.join('; ')}` : ''}`);
 }
 
 /* ======================================================================== deliberation (15–20, 22) */
