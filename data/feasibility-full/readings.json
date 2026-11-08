@@ -11,10 +11,10 @@
     "contextTokens": 16384
   },
   "lockedAt": "2026-11-07T09:00:09.092Z",
-  "storedStatus": "locked",
+  "storedStatus": "completed",
   "planned": 3,
-  "completed": 2,
-  "done": false,
+  "completed": 3,
+  "done": true,
   "slots": [
     {
       "slot": "exp_42405c021b81-fixed-r1",
@@ -70,8 +70,8 @@
       "repetition": 1,
       "runId": "exp_42405c021b81-evoorg-r1-a2",
       "attempt": 2,
-      "pending": true,
-      "status": null,
+      "pending": false,
+      "status": "completed",
       "excluded": [
         {
           "runId": "exp_42405c021b81-evoorg-r1",
@@ -80,25 +80,34 @@
           "wallSeconds": 8732
         }
       ],
-      "startedAt": null,
-      "finishedAt": null,
-      "wallSeconds": null,
-      "tasks": null,
-      "successRate": null,
-      "cumulativeReward": null,
-      "tokens": null,
-      "modelCalls": null,
-      "usd": null,
-      "generation": null,
-      "mutationsAccepted": null,
-      "mutationsRejected": null,
-      "modelCallFailures": null,
-      "agentFailures": null
+      "startedAt": "2026-11-08T09:00:06.368Z",
+      "finishedAt": "2026-11-08T11:30:58.065Z",
+      "wallSeconds": 9052,
+      "tasks": 20,
+      "successRate": 0.15,
+      "cumulativeReward": 10.028458049886622,
+      "tokens": 1568761,
+      "modelCalls": 877,
+      "usd": 0,
+      "generation": 1,
+      "mutationsAccepted": 1,
+      "mutationsRejected": 2,
+      "modelCallFailures": 0,
+      "agentFailures": 0
     }
   ],
-  "shadowRuns": 8,
+  "shadowRuns": 16,
   "allRunIds": [
     "exp_42405c021b81-evoorg-r1",
+    "exp_42405c021b81-evoorg-r1-a2",
+    "exp_42405c021b81-evoorg-r1-a2-val1-inc",
+    "exp_42405c021b81-evoorg-r1-a2-val2-minus",
+    "exp_42405c021b81-evoorg-r1-a2-val3-cf",
+    "exp_42405c021b81-evoorg-r1-a2-val4-inc",
+    "exp_42405c021b81-evoorg-r1-a2-val5-minus",
+    "exp_42405c021b81-evoorg-r1-a2-val6-cf",
+    "exp_42405c021b81-evoorg-r1-a2-val7-cf",
+    "exp_42405c021b81-evoorg-r1-a2-val8-cand",
     "exp_42405c021b81-evoorg-r1-val1-inc",
     "exp_42405c021b81-evoorg-r1-val2-minus",
     "exp_42405c021b81-evoorg-r1-val3-cf",
@@ -213,50 +222,71 @@
     {
       "conditionId": "evoorg",
       "condition": "evoorg",
-      "runs": [],
+      "runs": [
+        "exp_42405c021b81-evoorg-r1-a2"
+      ],
       "cumulativeReward": {
-        "mean": null,
+        "mean": 10.028458049886622,
         "lo": null,
         "hi": null,
         "sd": null,
-        "n": 0
+        "n": 1
       },
       "successRate": {
-        "mean": null,
+        "mean": 0.15,
         "lo": null,
         "hi": null,
         "sd": null,
-        "n": 0
+        "n": 1
       },
       "lifetimeTokens": {
-        "mean": null,
+        "mean": 1568761,
         "lo": null,
         "hi": null,
         "sd": null,
-        "n": 0
+        "n": 1
       },
       "lifetimeUsd": {
-        "mean": null,
+        "mean": 0,
         "lo": null,
         "hi": null,
         "sd": null,
-        "n": 0
+        "n": 1
       },
       "reviewerCoverage": {
-        "mean": null,
+        "mean": 1,
         "lo": null,
         "hi": null,
         "sd": null,
-        "n": 0
+        "n": 1
       },
       "securitySuccess": {
-        "mean": null,
+        "mean": 0,
         "lo": null,
         "hi": null,
         "sd": null,
-        "n": 0
+        "n": 1
       }
     }
   ],
-  "comparisons": []
+  "comparisons": [
+    {
+      "a": "evoorg",
+      "b": "fixed",
+      "metric": "cumulativeReward",
+      "meanDiff": -2.521541950113379,
+      "lo": -2.521541950113379,
+      "hi": -2.521541950113379,
+      "n": 1
+    },
+    {
+      "a": "evoorg",
+      "b": "pertask",
+      "metric": "cumulativeReward",
+      "meanDiff": -2.0447845804988667,
+      "lo": -2.0447845804988667,
+      "hi": -2.0447845804988667,
+      "n": 1
+    }
+  ]
 }
