@@ -13,6 +13,7 @@ Automated nightly research sessions for [OrgWorld](https://github.com/roszhan268
 
 | Date | Outcome | Experiment | New runs | Progress | Why it stopped |
 | --- | --- | --- | --- | --- | --- |
+| [2026-11-10](sessions/2026-11-10.md) | skipped | — | — | — | On battery power (REQUIRE_AC_POWER=1). |
 | [2026-11-09](sessions/2026-11-09.md) | queue finished | — | — | — | Every queued experiment is complete. Review the results, then add the next config to QUEUE in ~/orgworld-lab/lab.env. |
 | [2026-11-08](sessions/2026-11-08.md) | ran | feasibility-full | 1 | 3/3 | experiment complete |
 | [2026-11-07](sessions/2026-11-07.md) | ran | feasibility-full | 0 | 2/3 | publish only: results recorded so far, no new runs |
