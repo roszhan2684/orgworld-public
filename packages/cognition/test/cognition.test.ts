@@ -141,4 +141,12 @@ describe('ollama provider (mock fetch, free)', () => {
     const fetchImpl = (async () => { throw new Error('ECONNREFUSED'); }) as unknown as typeof fetch;
     await expect(new OllamaProvider({ fetchImpl }).complete(req)).rejects.toThrow(/ollama serve/);
   });
+  it('raises a request timeout as fatal infrastructure, not a failed agent turn', async () => {
+    const timeout = new Error('The operation was aborted due to timeout');
+    timeout.name = 'TimeoutError';
+    const fetchImpl = (async () => { throw timeout; }) as unknown as typeof fetch;
+    const err = await new OllamaProvider({ fetchImpl }).complete(req).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CognitionError);
+    expect(err).toMatchObject({ retryable: false, fatal: true });
+  });
 });

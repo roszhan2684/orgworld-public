@@ -40,9 +40,14 @@ export class OllamaProvider implements CognitionProvider {
       });
     } catch (err) {
       // Connection refused/reset is transient (the runner backs off, then stops the run as an infrastructure failure).
-      // A request timeout is not retried: the same slow call would just time out again.
+      // A request timeout is not retried: the same slow call would just time out again, and it says the machine is
+      // too slow, not that the agents organized badly, so it is fatal rather than a failed agent turn.
       const timedOut = err instanceof Error && err.name === 'TimeoutError';
-      throw new CognitionError(`cannot reach Ollama (is \`ollama serve\` running?): ${err instanceof Error ? err.message : String(err)}`, !timedOut);
+      throw new CognitionError(
+        `cannot reach Ollama (is \`ollama serve\` running?): ${err instanceof Error ? err.message : String(err)}`,
+        !timedOut,
+        { fatal: timedOut },
+      );
     }
     if (!res.ok) throw new CognitionError(`Ollama ${res.status}: ${(await res.text()).slice(0, 400)}`, res.status >= 500);
     // Streamed NDJSON: avoids fetch's 300 s header timeout on slow (e.g. CPU-only) machines.
