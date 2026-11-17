@@ -467,5 +467,15 @@ export function resultsCsv(r: Pick<ExperimentResult, 'experimentId' | 'condition
       m.learning.counterfactuals,
     ]),
   );
-  return [head, ...rows].map((r2) => r2.map((v) => (typeof v === 'string' && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : String(v))).join(',')).join('\n') + '\n';
+  return csvText([head, ...rows]);
+}
+
+export function comparisonsCsv(r: Pick<ExperimentResult, 'experimentId' | 'comparisons'>): string {
+  const head = ['experiment_id', 'condition_a', 'condition_b', 'metric', 'mean_diff', 'ci_low', 'ci_high', 'n_pairs'];
+  const rows = r.comparisons.map(({ a, b, metric, meanDiff, lo, hi, n }) => [r.experimentId, a, b, metric, meanDiff, lo, hi, n]);
+  return csvText([head, ...rows]);
+}
+
+function csvText(rows: (string | number | boolean | null | undefined)[][]): string {
+  return rows.map((row) => row.map((value) => (typeof value === 'string' && /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : String(value))).join(',')).join('\n') + '\n';
 }

@@ -10,7 +10,7 @@ import { createProvider, isPaidProvider, paidAllowed, resolveClaudeBin } from '@
 import { FAMILIES, taskById } from '@orgworld/bench';
 import { buildRunConfig, createRun, OrgRunner } from '@orgworld/runtime';
 import { runMetrics } from '@orgworld/metrics';
-import { experimentIdOf, experimentReadings, readingsCsv, resultsCsv, runExperiment } from '@orgworld/experiment';
+import { comparisonsCsv, experimentIdOf, experimentReadings, readingsCsv, resultsCsv, runExperiment } from '@orgworld/experiment';
 import { startServer } from '@orgworld/server';
 
 interface WorkspaceConfig {
@@ -331,11 +331,15 @@ async function main() {
       if (stopAt !== undefined) out(`time window closes ${new Date(stopAt).toString()}`);
       const res = await runExperiment({ store, config, provider: () => createProvider(model, { allowPaid: flags['allow-paid'] === true }), log: out, ...(stopAt !== undefined ? { stopAt } : {}) }).finally(() => store.setKv(lockKey, null));
       const csv = join(wsDir(), 'experiments', `${res.experimentId}.csv`);
+      const comparisonsPath = join(wsDir(), 'experiments', `${res.experimentId}-comparisons.csv`);
       writeFileSync(csv, resultsCsv(res));
+      writeFileSync(comparisonsPath, comparisonsCsv(res));
       for (const c of res.conditions) out(`${c.conditionId.padEnd(14)} CR ${c.cumulativeReward.mean.toFixed(2)} ± ${(c.cumulativeReward.hi - c.cumulativeReward.mean || 0).toFixed(2)} · SR ${c.successRate.mean.toFixed(2)} · tokens ${Math.round(c.lifetimeTokens.mean).toLocaleString()}`);
+      for (const c of res.comparisons) out(`${c.a} − ${c.b} · ${c.metric}: ${c.meanDiff.toFixed(4)} (95% CI ${c.lo.toFixed(4)} to ${c.hi.toFixed(4)}, n=${c.n})`);
       for (const n of res.notes) out(`note: ${n}`);
       out(`status: ${res.status}`);
       out(`results → ${csv}`);
+      out(`comparisons → ${comparisonsPath}`);
       return store.close();
     }
     case 'readings': {
