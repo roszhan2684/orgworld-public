@@ -38745,7 +38745,15 @@ function resultsCsv(r2) {
       m.learning.counterfactuals
     ])
   );
-  return [head, ...rows].map((r22) => r22.map((v) => typeof v === "string" && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : String(v)).join(",")).join("\n") + "\n";
+  return csvText([head, ...rows]);
+}
+function comparisonsCsv(r2) {
+  const head = ["experiment_id", "condition_a", "condition_b", "metric", "mean_diff", "ci_low", "ci_high", "n_pairs"];
+  const rows = r2.comparisons.map(({ a, b, metric, meanDiff, lo, hi, n }) => [r2.experimentId, a, b, metric, meanDiff, lo, hi, n]);
+  return csvText([head, ...rows]);
+}
+function csvText(rows) {
+  return rows.map((row) => row.map((value) => typeof value === "string" && /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : String(value)).join(",")).join("\n") + "\n";
 }
 
 // packages/server/src/server.ts
@@ -39232,11 +39240,15 @@ async function main() {
       if (stopAt !== void 0) out(`time window closes ${new Date(stopAt).toString()}`);
       const res = await runExperiment({ store, config: config2, provider: () => createProvider(model, { allowPaid: flags["allow-paid"] === true }), log: out, ...stopAt !== void 0 ? { stopAt } : {} }).finally(() => store.setKv(lockKey, null));
       const csv = join5(wsDir(), "experiments", `${res.experimentId}.csv`);
+      const comparisonsPath = join5(wsDir(), "experiments", `${res.experimentId}-comparisons.csv`);
       writeFileSync3(csv, resultsCsv(res));
+      writeFileSync3(comparisonsPath, comparisonsCsv(res));
       for (const c of res.conditions) out(`${c.conditionId.padEnd(14)} CR ${c.cumulativeReward.mean.toFixed(2)} \xB1 ${(c.cumulativeReward.hi - c.cumulativeReward.mean || 0).toFixed(2)} \xB7 SR ${c.successRate.mean.toFixed(2)} \xB7 tokens ${Math.round(c.lifetimeTokens.mean).toLocaleString()}`);
+      for (const c of res.comparisons) out(`${c.a} \u2212 ${c.b} \xB7 ${c.metric}: ${c.meanDiff.toFixed(4)} (95% CI ${c.lo.toFixed(4)} to ${c.hi.toFixed(4)}, n=${c.n})`);
       for (const n of res.notes) out(`note: ${n}`);
       out(`status: ${res.status}`);
       out(`results \u2192 ${csv}`);
+      out(`comparisons \u2192 ${comparisonsPath}`);
       return store.close();
     }
     case "readings": {

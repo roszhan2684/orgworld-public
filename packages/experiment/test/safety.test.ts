@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { EventStore } from '@orgworld/store';
 import { CognitionError, ScriptedProvider, type CognitionProvider, type CognitionRequest } from '@orgworld/cognition';
 import { familyById, taskById } from '@orgworld/bench';
-import { experimentReadings, experimentSpendUsd, readingsCsv, runExperiment } from '../src/index.ts';
+import { comparisonsCsv, experimentReadings, experimentSpendUsd, readingsCsv, runExperiment } from '../src/index.ts';
 
 /*
  * PIPELINE TESTS with the SCRIPTED provider (free, deterministic, labelled scripted — NOT research results).
@@ -94,6 +94,12 @@ describe('constitutional constraint Ω in experiments (II-§63)', () => {
     expect(cov).toMatchObject({ a: 'omega', b: 'open', n: 1 });
     expect(cov.meanDiff).toBeGreaterThan(0);
     expect(by.omega!.reviewerCoverage.mean).toBe(1);
+
+    const [header, ...rows] = comparisonsCsv(res).trimEnd().split('\n');
+    expect(header).toBe('experiment_id,condition_a,condition_b,metric,mean_diff,ci_low,ci_high,n_pairs');
+    expect(rows).toHaveLength(res.comparisons.length);
+    expect(rows).toContain([res.experimentId, 'omega', 'open', 'reviewerCoverage', cov.meanDiff, cov.lo, cov.hi, 1].join(','));
+    expect(comparisonsCsv({ experimentId: res.experimentId, comparisons: [] })).toBe(header + '\n');
   }, 120_000);
 
   it('refuses a starting organization that violates its own constraints, and unknown comparison ids', async () => {
